@@ -51,6 +51,7 @@ struct Queue * queue_open(const char * path);
 int queue_is_opened (const struct Queue const * q);
 int queue_push(struct Queue *q, struct QueueData *d);
 int queue_pop(struct Queue *q, struct QueueData *d);
+int queue_is_empty(struct Queue * const q);
 int queue_len(struct Queue *q, int64_t *len);
 int queue_peek(struct Queue *q, int64_t s, struct QueueData *d);
 int queue_poke(struct Queue *q, int64_t s, struct QueueData *d);

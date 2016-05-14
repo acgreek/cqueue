@@ -193,20 +193,26 @@ int queue_pop(struct Queue * const q, struct QueueData * const d) {
 	return LIBQUEUE_SUCCESS;
 }
 
-int queue_len(struct Queue * const q, int64_t * const lenbuf) {
-	assert(lenbuf != NULL);
+int queue_is_empty(struct Queue * const q) {
 	if (NULL == q->readItr) {
 		q->readItr= leveldb_create_iterator(q->db,q->rop);
 	}
 	leveldb_iter_seek_to_first(q->readItr);
 	if (0 == leveldb_iter_valid(q->readItr)) {
-		*lenbuf = 0;
-		return LIBQUEUE_SUCCESS;
+        return 1;
 	}
+    return 0;
+
+}
+
+int queue_len(struct Queue * const q, int64_t * const lenbuf) {
+	assert(lenbuf != NULL);
+    if (0 == queue_is_empty(q)) {
+        return 0;
+    }
 	size_t sizes[1]  = { 0 };
 	u_int64_t starti = 0;
 	u_int64_t limiti = ULLONG_MAX;
-
 	const char * start[1] = {(const char *)&starti };
 	size_t start_len[1] = { sizeof(u_int64_t)  };
 	const char * limit[1] = {(const char *)&limiti };
