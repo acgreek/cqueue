@@ -18,8 +18,14 @@
  * */
 
 
-#ifndef QUEUE_H
-#define QUEUE_H
+#ifndef CQUEUE_H
+#define CQUEUE_H
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
 
 #include <assert.h>
 #include <string.h>
@@ -58,5 +64,9 @@ int queue_poke(struct Queue *q, int64_t s, struct QueueData *d);
 int queue_close(struct Queue *q);
 int queue_opened(struct Queue *q);
 const char * queue_get_last_error(const struct Queue const *q);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* QUEUE_H */
