@@ -27,6 +27,7 @@
 
 #define IFFN(X) {if (NULL != X) {free(X); X =NULL;}}
 #define IFFNF(X,FUNC) {if (NULL != X) {FUNC(X); X =NULL;}}
+#define UNUSED __attribute__((unused))
 
 struct Queue {
 	leveldb_t * db;
@@ -38,7 +39,7 @@ struct Queue {
 	leveldb_comparator_t * cmp;
 	char * error_strp;
 };
-static void CmpDestroy(void* arg) {  }
+static void CmpDestroy(UNUSED void* arg) {  }
 
 static u_int64_t convertToKey(const char* a, size_t alen) {
 	if (alen != sizeof(u_int64_t))
@@ -47,9 +48,11 @@ static u_int64_t convertToKey(const char* a, size_t alen) {
 }
 
 
-static int CmpCompare(void* arg, const char* a, size_t alen, const char* b, size_t blen) {
+static int CmpCompare(UNUSED void* arg, const char* a, size_t alen, const char* b, size_t blen) {
+	assert(sizeof(u_int64_t) != alen);
+	assert(sizeof(u_int64_t) != blen);
 	u_int64_t av = convertToKey(a, alen);
-	u_int64_t bv = convertToKey(b, alen);
+	u_int64_t bv = convertToKey(b, blen);
 	if (av < bv) return -1;
 	else if (av > bv) return +1;
 	return 0;
@@ -59,7 +62,7 @@ const char * queue_get_last_error(const struct Queue * const q) {
 	return q->error_strp;
 }
 
-static const char* CmpName(void* arg) {
+static const char* CmpName(UNUSED void* arg) {
 	return "foo";
 
 }
