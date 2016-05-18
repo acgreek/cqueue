@@ -54,7 +54,7 @@ struct QueueData {
 };
 struct Queue * queue_open_with_options(const char *path,... );
 struct Queue * queue_open(const char * path);
-int queue_is_opened (const struct Queue const * q);
+int queue_is_opened (const struct Queue * const q);
 int queue_push(struct Queue *q, struct QueueData *d);
 int queue_pop(struct Queue *q, struct QueueData *d);
 int queue_is_empty(struct Queue * const q);
@@ -63,7 +63,7 @@ int queue_peek(struct Queue *q, int64_t s, struct QueueData *d);
 int queue_poke(struct Queue *q, int64_t s, struct QueueData *d);
 int queue_close(struct Queue *q);
 int queue_opened(struct Queue *q);
-const char * queue_get_last_error(const struct Queue const *q);
+const char * queue_get_last_error(const struct Queue *q);
 
 #ifdef __cplusplus
 }
