@@ -201,10 +201,7 @@ int queue_is_empty(struct Queue * const q) {
 		q->readItr= leveldb_create_iterator(q->db,q->rop);
 	}
 	leveldb_iter_seek_to_first(q->readItr);
-	if (0 == leveldb_iter_valid(q->readItr)) {
-        return 1;
-	}
-    return 0;
+	return  leveldb_iter_valid(q->readItr);
 
 }
 
