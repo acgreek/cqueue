@@ -3,8 +3,9 @@
 #include "queue.h"
 #include <libgen.h>
 #include <string.h>
+#define UNUSED __attribute__((unused))
 
-int main(int argc, char **argv) {
+int main(UNUSED int argc, char **argv) {
 	struct Queue *q;
 	int32_t ft = 42;
 	struct QueueData qd = { "HENRY" , sizeof("HENRY") };
@@ -55,7 +56,7 @@ int main(int argc, char **argv) {
 	for (i = 0; i < 15; i++) {
 		queue_pop(q, &qd2);
 		int len = sprintf(buffer,"%d",i);
-		if (len != qd2.vlen || 0 != memcmp(buffer, qd2.v, qd2.vlen)) {
+		if ((size_t)len != qd2.vlen || 0 != memcmp(buffer, qd2.v, qd2.vlen)) {
 			printf("pop value not expected at index %d: %s\n", i, (char *)qd2.v);
 		}
 		if (qd2.v)

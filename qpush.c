@@ -24,6 +24,7 @@
 #include "queue.h"
 #include <signal.h>
 #include "queueutils.h"
+#define UNUSED __attribute__((unused))
 
 /* global so that we can close the database properly in case of an
  * interrupt while reading from stdin */
@@ -40,7 +41,7 @@ static inline void push_buf(struct Queue *q,
   memset(linebuf, 0, *linebuflen);
 }
 
-void sighandler(int s) {
+void sighandler(UNUSED int s) {
   puts("Cought SIGINT and SIGTERM while reading from stdin.\n"
       "I'll try to exit gracefully...");
   exit(EXIT_FAILURE);
