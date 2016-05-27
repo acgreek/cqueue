@@ -3,9 +3,8 @@
 #include "queue.h"
 #include <libgen.h>
 #include <string.h>
-#define UNUSED __attribute__((unused))
 
-int main(UNUSED int argc, char **argv) {
+int main(int argc, char **argv) {
 	struct Queue *q;
 	int32_t ft = 42;
 	struct QueueData qd = { "HENRY" , sizeof("HENRY") };
@@ -53,15 +52,39 @@ int main(UNUSED int argc, char **argv) {
 		qd2.vlen= sprintf(buffer,"%d",i);
 		queue_push(q, &qd2);
 	}
+    int64_t count;
+    if (0 != queue_count(q, &count)) {
+    }
+    if (15 != count) {
+		fprintf(stderr, "ERROR: there should be 15 in the queue but got back %lld\n", (long long unsigned)count);
+    }
 	for (i = 0; i < 15; i++) {
 		queue_pop(q, &qd2);
 		int len = sprintf(buffer,"%d",i);
-		if ((size_t)len != qd2.vlen || 0 != memcmp(buffer, qd2.v, qd2.vlen)) {
+		if (len != qd2.vlen || 0 != memcmp(buffer, qd2.v, qd2.vlen)) {
 			printf("pop value not expected at index %d: %s\n", i, (char *)qd2.v);
 		}
 		if (qd2.v)
 			free(qd2.v);
 	}
+	for (i = 0; i < 15; i++) {
+		qd2.v = buffer;
+		qd2.vlen= sprintf(buffer,"%d",i);
+		queue_push(q, &qd2);
+	}
+    if (0 != queue_count(q, &count)) {
+    }
+    if (15 != count) {
+		fprintf(stderr, "ERROR: there should be 15 in the queue but got back %lld\n", (long long unsigned)count);
+    }
+	for (i = 0; i < 15; i++) {
+		queue_pop(q, NULL);
+	}
+    if (0 != queue_count(q, &count)) {
+    }
+    if (0 != count) {
+		fprintf(stderr, "ERROR: there should be 0 in the queue but got back %lld\n", (long long unsigned)count);
+    }
 
 	if(queue_close(q) != 0)
 		puts("there was an error closing the queue!");

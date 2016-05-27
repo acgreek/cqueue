@@ -27,7 +27,6 @@
 
 #define IFFN(X) {if (NULL != X) {free(X); X =NULL;}}
 #define IFFNF(X,FUNC) {if (NULL != X) {FUNC(X); X =NULL;}}
-#define UNUSED __attribute__((unused))
 
 struct Queue {
 	leveldb_t * db;
@@ -39,7 +38,7 @@ struct Queue {
 	leveldb_comparator_t * cmp;
 	char * error_strp;
 };
-static void CmpDestroy(UNUSED void* arg) {  }
+static void CmpDestroy(void* arg) {  }
 
 static u_int64_t convertToKey(const char* a, size_t alen) {
 	if (alen != sizeof(u_int64_t))
@@ -48,11 +47,9 @@ static u_int64_t convertToKey(const char* a, size_t alen) {
 }
 
 
-static int CmpCompare(UNUSED void* arg, const char* a, size_t alen, const char* b, size_t blen) {
-	assert(sizeof(u_int64_t) != alen);
-	assert(sizeof(u_int64_t) != blen);
+static int CmpCompare(void* arg, const char* a, size_t alen, const char* b, size_t blen) {
 	u_int64_t av = convertToKey(a, alen);
-	u_int64_t bv = convertToKey(b, blen);
+	u_int64_t bv = convertToKey(b, alen);
 	if (av < bv) return -1;
 	else if (av > bv) return +1;
 	return 0;
@@ -62,7 +59,7 @@ const char * queue_get_last_error(const struct Queue * const q) {
 	return q->error_strp;
 }
 
-static const char* CmpName(UNUSED void* arg) {
+static const char* CmpName(void* arg) {
 	return "foo";
 
 }
@@ -71,7 +68,7 @@ int queue_is_opened (const struct Queue * const q) {
 	return NULL != q->db;
 }
 
-struct Queue * queue_open_with_options(const char * const path,... ) {
+static struct Queue * readoptions (va_list argp) {
 	struct Queue * q = malloc(sizeof (struct Queue));
 	memset(q, 0, sizeof(struct Queue));
 
@@ -82,8 +79,6 @@ struct Queue * queue_open_with_options(const char * const path,... ) {
 
 	q->rop = leveldb_readoptions_create();
 	q->wop = leveldb_writeoptions_create();
-	va_list argp;
-	va_start(argp, path);
 	const char * p;
 	for (p = va_arg(argp, char *); p != NULL; p = va_arg(argp,char *)) {
 		if (0 == strcmp(p, "failIfMissing")) {
@@ -115,13 +110,33 @@ struct Queue * queue_open_with_options(const char * const path,... ) {
 			leveldb_writeoptions_set_sync(q->wop , 1);
 		}
 	}
+	return q;
+}
+
+struct Queue * queue_open_with_options(const char * const path,... ) {
+	va_list argp;
+	va_start(argp, path);
+	struct Queue * q = readoptions(argp);
 	va_end(argp);
+
 	q->db = leveldb_open(q->options, path, &q->error_strp);
 	return q;
 }
 
 struct Queue * queue_open(const char * const path) {
 	return queue_open_with_options(path,NULL);
+}
+void queue_repair_with_options(const char * const path,... ) {
+	va_list argp;
+	va_start(argp, path);
+	struct Queue * q = readoptions(argp);
+	va_end(argp);
+
+	leveldb_repair_db(q->options, path, &q->error_strp);
+
+}
+void queue_repair(const char * path) {
+	return queue_repair_with_options(path,NULL);
 }
 static void freeItrs(struct Queue * const q) {
 	IFFNF(q->readItr, leveldb_iter_destroy);
@@ -171,20 +186,20 @@ int queue_push(struct Queue * const q, struct QueueData * const d) {
 
 int queue_pop(struct Queue * const q, struct QueueData * const d) {
 	assert(q != NULL);
-	assert(d != NULL);
 	if (NULL == q->readItr )
 		q->readItr= leveldb_create_iterator(q->db,q->rop);
 	leveldb_iter_seek_to_first(q->readItr);
 	if (0 == leveldb_iter_valid(q->readItr)) {
 		return LIBQUEUE_FAILURE;
 	}
-	d->v = (char *)leveldb_iter_value(q->readItr, &d->vlen);
-	if (d->v) {
-		char * tmp = malloc (d->vlen);
-		memcpy(tmp, d->v, d->vlen);
-		d->v = tmp;
+	if (d) {
+		d->v = (char *)leveldb_iter_value(q->readItr, &d->vlen);
+		if (d->v) {
+			char * tmp = malloc (d->vlen);
+			memcpy(tmp, d->v, d->vlen);
+			d->v = tmp;
+		}
 	}
-
 	u_int64_t key = getKeyFromIter(q->readItr);
 	leveldb_iter_next(q->readItr);
 	if (q->error_strp) {
@@ -196,23 +211,52 @@ int queue_pop(struct Queue * const q, struct QueueData * const d) {
 	return LIBQUEUE_SUCCESS;
 }
 
-int queue_is_empty(struct Queue * const q) {
+int queue_count(struct Queue * const q, int64_t * const countp) {
+	assert(q != NULL);
+	assert(count != NULL);
 	if (NULL == q->readItr) {
 		q->readItr= leveldb_create_iterator(q->db,q->rop);
 	}
+	leveldb_iter_seek_to_last(q->readItr);
+	if (0 == leveldb_iter_valid(q->readItr)) {
+		*countp = 0;
+		return LIBQUEUE_SUCCESS;
+	}
+	u_int64_t lastQIndex = getKeyFromIter(q->readItr);
 	leveldb_iter_seek_to_first(q->readItr);
-	return  leveldb_iter_valid(q->readItr);
+	u_int64_t firstQIndex = getKeyFromIter(q->readItr);
+	*countp = lastQIndex -firstQIndex +1; //add 1 because zero indexed;
+	return LIBQUEUE_SUCCESS;
+
+}
+int queue_compact(struct Queue *q) {
+	assert(q != NULL);
+	u_int64_t starti = 0;
+	u_int64_t limiti = ULLONG_MAX;
+
+	const char * start = (const char *)&starti;
+	const char * limit = (const char *) & limiti;
+	leveldb_compact_range(q->db, start,sizeof (starti), limit, sizeof(limiti));
+	// TODO, figure out fast way to get size
+	return LIBQUEUE_SUCCESS;
 
 }
 
 int queue_len(struct Queue * const q, int64_t * const lenbuf) {
+	assert(q != NULL);
 	assert(lenbuf != NULL);
-    if (0 == queue_is_empty(q)) {
-        return 0;
-    }
+	if (NULL == q->readItr) {
+		q->readItr= leveldb_create_iterator(q->db,q->rop);
+	}
+	leveldb_iter_seek_to_first(q->readItr);
+	if (0 == leveldb_iter_valid(q->readItr)) {
+		*lenbuf = 0;
+		return LIBQUEUE_SUCCESS;
+	}
 	size_t sizes[1]  = { 0 };
 	u_int64_t starti = 0;
 	u_int64_t limiti = ULLONG_MAX;
+
 	const char * start[1] = {(const char *)&starti };
 	size_t start_len[1] = { sizeof(u_int64_t)  };
 	const char * limit[1] = {(const char *)&limiti };
