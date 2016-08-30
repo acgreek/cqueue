@@ -24,6 +24,8 @@ set(MYLIB_VERSION_STRING ${MYLIB_VERSION_MAJOR}.${MYLIB_VERSION_MINOR}.${MYLIB_V
 
 set_target_properties(queue PROPERTIES VERSION ${MYLIB_VERSION_STRING} SOVERSION ${MYLIB_VERSION_MAJOR})
 
+add_executable(bench bench.c ) 
+target_link_libraries(bench queue ${LevelDB_LIBRARIES} )
 
 add_executable(qpush qpush.c ) 
 target_link_libraries(qpush queue ${LevelDB_LIBRARIES} )
