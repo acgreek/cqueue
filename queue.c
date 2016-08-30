@@ -21,96 +21,122 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/file.h>
-#include <leveldb/c.h>
+#include <stdarg.h>
 #include <limits.h>
 #include <fcntl.h>
+#include <string.h>
+#include <time.h>
 
 #define IFFN(X) {if (NULL != X) {free(X); X =NULL;}}
 #define IFFNF(X,FUNC) {if (NULL != X) {FUNC(X); X =NULL;}}
 
+struct FileItr {
+	FILE *journalfd;
+	FILE *binlogfd;
+};
+int fileItr_opened(struct FileItr *itrp ) {
+	return itrp->journalfd != NULL;
+}
+
 struct Queue {
-	leveldb_t * db;
-	leveldb_iterator_t* readItr;
-	leveldb_iterator_t* writeItr;
-	leveldb_readoptions_t* rop;
-	leveldb_writeoptions_t* wop;
-	leveldb_options_t* options;
-	leveldb_comparator_t * cmp;
+	char * path;
+	struct FileItr read;
+	struct FileItr write;
 	char * error_strp;
 };
-static void CmpDestroy(void* arg) {  }
-
-static u_int64_t convertToKey(const char* a, size_t alen) {
-	if (alen != sizeof(u_int64_t))
-		return 0;
-	return *((u_int64_t *)a);
-}
-
-
-static int CmpCompare(void* arg, const char* a, size_t alen, const char* b, size_t blen) {
-	u_int64_t av = convertToKey(a, alen);
-	u_int64_t bv = convertToKey(b, alen);
-	if (av < bv) return -1;
-	else if (av > bv) return +1;
-	return 0;
-}
 
 const char * queue_get_last_error(const struct Queue * const q) {
 	return q->error_strp;
 }
 
-static const char* CmpName(void* arg) {
-	return "foo";
-
-}
 
 int queue_is_opened (const struct Queue * const q) {
-	return NULL != q->db;
+	return NULL != q->path;
 }
 
 static struct Queue * readoptions (va_list argp) {
 	struct Queue * q = malloc(sizeof (struct Queue));
 	memset(q, 0, sizeof(struct Queue));
+	return q;
+}
+int openJournalAtTime(time_t time,const char * path, struct FileItr * itr) {
+	char file[1024];
+	snprintf(file, sizeof(file)-1,"%s/journal.%lu", path,(unsigned long)time);
+	itr->journalfd = fopen (file, "r+");
+	if (NULL == itr->journalfd)
+		itr->journalfd = fopen (file, "w+");
+	snprintf(file, sizeof(file)-1,"%s/bin_log.%lu", path,(unsigned long)time);
+	itr->binlogfd= fopen (file, "r+");
+	if (NULL == itr->binlogfd)
+		itr->binlogfd= fopen (file, "w+");
+	return 0;
+}
 
-	q->options = leveldb_options_create();
-	q->cmp = leveldb_comparator_create(NULL, CmpDestroy, CmpCompare, CmpName);
-	leveldb_options_set_comparator(q->options, q->cmp);
-	leveldb_options_set_create_if_missing(q->options, 1);
+struct CatelogEntry {
+	time_t time;
+	char done;
+};
 
-	q->rop = leveldb_readoptions_create();
-	q->wop = leveldb_writeoptions_create();
-	const char * p;
-	for (p = va_arg(argp, char *); p != NULL; p = va_arg(argp,char *)) {
-		if (0 == strcmp(p, "failIfMissing")) {
-			leveldb_options_set_create_if_missing(q->options,0);
-		}
-		if (0 == strcmp(p,"paranoidChecks")) {
-			leveldb_options_set_paranoid_checks(q->options,1);
-		}
-		if (0 == strcmp(p,"writeBufferSize")) {
-			size_t bufferSize= va_arg(argp, size_t);
-			leveldb_options_set_write_buffer_size(q->options,bufferSize);
-		}
-		if (0 == strcmp(p,"blockSize")) {
-			size_t blockSize= va_arg(argp, size_t);
-			leveldb_options_set_block_size(q->options,blockSize);
-		}
-		if (0 == strcmp(p,"blockRestartInterval")) {
-			size_t blockRestartInterval= va_arg(argp, size_t);
-			leveldb_options_set_block_restart_interval(q->options,blockRestartInterval);
-		}
-		if (0 == strcmp(p,"maxOpenFiles")) {
-			int maxOpenFiles= va_arg(argp, int );
-			leveldb_options_set_max_open_files(q->options,maxOpenFiles);
-		}
-		if (0 == strcmp(p,"noCompress")) {
-			leveldb_options_set_compression(q->options,0);
-		}
-		if (0 == strcmp(p,"syncWrte")) {
-			leveldb_writeoptions_set_sync(q->wop , 1);
+static time_t getOldestJournal(struct Queue *q) {
+	char file[1024];
+	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
+	FILE * journalsfd = fopen(file, "r+");
+	if (NULL == journalsfd)
+		return 0;
+	struct CatelogEntry entry;
+	struct CatelogEntry oldest_entry;
+	oldest_entry.time = ULONG_MAX;
+	while (!feof(journalsfd)) {
+		fread(&entry, sizeof(entry), 1, journalsfd);
+		if (0 == entry.done && ((unsigned long) entry.time) < (unsigned long)oldest_entry.time) {
+			oldest_entry = entry;
 		}
 	}
-	return q;
+	fclose (journalsfd);
+	return ULONG_MAX == oldest_entry.time ? 0 : oldest_entry.time;
+}
+static time_t newestEntry(struct Queue *q) {
+	char file[1024];
+	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
+	FILE * journalsfd = fopen(file, "r+");
+	if (NULL == journalsfd)
+		return 0;
+	struct CatelogEntry entry;
+	struct CatelogEntry newest_entry;
+	newest_entry.time = 0;
+	while (!feof(journalsfd)) {
+		fread(&entry, sizeof(entry), 1, journalsfd);
+		if (0 == entry.done && entry.time > newest_entry.time) {
+			newest_entry = entry;
+		}
+	}
+	fclose (journalsfd);
+	return ULONG_MAX == newest_entry.time ? 0 : newest_entry.time;
+}
+static void putEntry(struct Queue *q, time_t time) {
+	char file[1024];
+	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
+	FILE * journalsfd = fopen(file, "r+");
+	if (NULL == journalsfd){
+		fprintf(stderr, "error opening catelog file %s: %s\n",file , strerror(errno));
+		journalsfd = fopen(file, "w+");
+		if (NULL == journalsfd){
+			fprintf(stderr, "error create catelog file %s: %s\n",file , strerror(errno));
+			return;
+		}
+	}
+	struct CatelogEntry entry;
+	while (!feof(journalsfd)) {
+		fread(&entry, sizeof(entry), 1, journalsfd);
+		if (1 == entry.done) {
+			fseek(journalsfd,-sizeof(entry), SEEK_CUR);
+			break;
+		}
+	}
+	entry.done= 0;
+	entry.time = time;
+	fwrite(&entry, sizeof(entry), 1, journalsfd);
+	fclose (journalsfd);
 }
 
 struct Queue * queue_open_with_options(const char * const path,... ) {
@@ -118,196 +144,147 @@ struct Queue * queue_open_with_options(const char * const path,... ) {
 	va_start(argp, path);
 	struct Queue * q = readoptions(argp);
 	va_end(argp);
+	if (F_OK != access(path, R_OK|W_OK)) {
+		printf("can't access: %s\n", path);
+		q-> error_strp = strdup("can not access path");
+		return q;
+	}
+	q->path = strdup(path);
 
-	q->db = leveldb_open(q->options, path, &q->error_strp);
+	time_t last = newestEntry(q);
+	if (0 != last ) {
+		openJournalAtTime(last, path, &q->write);
+		return q;
+	}
+	else {
+		last = time(NULL);
+		putEntry(q, last);
+	}
+	openJournalAtTime(last, path, &q->write);
+
 	return q;
 }
-
 struct Queue * queue_open(const char * const path) {
 	return queue_open_with_options(path,NULL);
 }
+#define UNUSED __attribute__((unused))
+
 void queue_repair_with_options(const char * const path,... ) {
 	va_list argp;
 	va_start(argp, path);
-	struct Queue * q = readoptions(argp);
+	UNUSED struct Queue * q = readoptions(argp);
 	va_end(argp);
-
-	leveldb_repair_db(q->options, path, &q->error_strp);
 
 }
 void queue_repair(const char * path) {
 	return queue_repair_with_options(path,NULL);
 }
-static void freeItrs(struct Queue * const q) {
-	IFFNF(q->readItr, leveldb_iter_destroy);
-	IFFNF(q->writeItr, leveldb_iter_destroy);
-}
-
 int queue_close(struct Queue *q) {
 	assert(q != NULL);
-	freeItrs(q);
-	IFFNF(q->db, leveldb_close);
-	IFFNF(q->options,leveldb_options_destroy);
-	IFFNF(q->cmp,leveldb_comparator_destroy);
-	IFFNF(q->wop,leveldb_writeoptions_destroy);
-	IFFNF(q->rop, leveldb_readoptions_destroy);
+	IFFN(q->path);
+	if (q->read.journalfd) fclose(q->read.journalfd);
+	q->read.journalfd =NULL;
+	if (q->read.binlogfd) fclose(q->read.binlogfd);
+	q->read.binlogfd=NULL;
+	if (q->write.journalfd) fclose(q->write.journalfd);
+	q->write.journalfd =NULL;
+	if (q->write.binlogfd) fclose(q->write.binlogfd);
+	q->write.binlogfd=NULL;
 	IFFN(q->error_strp);
 	IFFN(q);
 	return LIBQUEUE_SUCCESS;
 }
-static u_int64_t getKeyFromIter(leveldb_iterator_t * const itr) {
-	char * lkey= NULL;
-	size_t klen;
-	lkey = (char *)leveldb_iter_key(itr, &klen);
-	return convertToKey(lkey, klen);
-}
+
+struct JournalEntry {
+	unsigned long offset;
+	unsigned long size;
+	char done;
+};
 
 int queue_push(struct Queue * const q, struct QueueData * const d) {
 	assert(q != NULL);
 	assert(d != NULL);
 	assert(d->v != NULL);
-	if (NULL == q->writeItr)
-		q->writeItr= leveldb_create_iterator(q->db,q->rop);
-	leveldb_iter_seek_to_last(q->writeItr);
-	u_int64_t key;
-	if (0 == leveldb_iter_valid(q->writeItr)) {
-		key = 0;
-	} else  {
-		key = 1+ getKeyFromIter(q->writeItr);
-	}
-	if (q->error_strp) {
-		free(q->error_strp);
-		q->error_strp =NULL;
-	}
-	leveldb_put(q->db, q->wop,(const char *)&key, sizeof(u_int64_t),d->v, d->vlen, &q->error_strp);
-	freeItrs(q);
+	fseek(q->write.journalfd, 0, SEEK_END);
+	fseek(q->write.binlogfd, 0, SEEK_END);
+	struct JournalEntry entry;
+
+	entry.offset = ftell(q->write.binlogfd);
+	entry.size = d->vlen * fwrite(d->v, d->vlen, 1, q->write.binlogfd);
+	entry.done = 0;
+	fwrite((char *)&entry, sizeof(entry), 1, q->write.journalfd);
 	return LIBQUEUE_SUCCESS;
 }
 
 int queue_pop(struct Queue * const q, struct QueueData * const d) {
 	assert(q != NULL);
-	if (NULL == q->readItr )
-		q->readItr= leveldb_create_iterator(q->db,q->rop);
-	leveldb_iter_seek_to_first(q->readItr);
-	if (0 == leveldb_iter_valid(q->readItr)) {
-		return LIBQUEUE_FAILURE;
+	if (NULL == q->read.journalfd ) {
 	}
-	if (d) {
-		d->v = (char *)leveldb_iter_value(q->readItr, &d->vlen);
-		if (d->v) {
-			char * tmp = malloc (d->vlen);
-			memcpy(tmp, d->v, d->vlen);
-			d->v = tmp;
+	if (0 ==  fileItr_opened(&q->read) ) {
+		time_t 	oldest = getOldestJournal(q);
+		if (0 ==oldest) {
+			return LIBQUEUE_FAILURE;
+		}
+
+		openJournalAtTime(oldest, q->path, &q->read);
+	}
+	struct JournalEntry  je;
+	int read=0;
+	while (!feof(q->read.journalfd)) {
+		read++;
+		int readsize= fread(&je, sizeof(je),1,q->read.journalfd );
+		if (0 == readsize ) {
+			// mark current journal file done and pick up another try again
+			//
+			return LIBQUEUE_FAILURE;
+		}
+		if (0 == je.done ) {
+			break;
 		}
 	}
-	u_int64_t key = getKeyFromIter(q->readItr);
-	leveldb_iter_next(q->readItr);
-	if (q->error_strp) {
-		free(q->error_strp);
-		q->error_strp =NULL;
+	if (0 == read) {
+		// mark current journal file done and pick up another try again
+		//
+		return LIBQUEUE_FAILURE;
 	}
-	leveldb_delete(q->db,  q->wop,(const char *) &key, sizeof(u_int64_t), &q->error_strp);
-	freeItrs(q);
+	fseek(q->read.journalfd, -sizeof (je),  SEEK_CUR );
+	d->vlen = je.size;
+	d->v = malloc (d->vlen );
+	fseek(q->read.binlogfd, je.offset,  SEEK_SET);
+	fread(d->v,  d->vlen,1, q->read.binlogfd);
+	je.done = 1;
+	fwrite(&je, sizeof(je),1,q->read.journalfd );
 	return LIBQUEUE_SUCCESS;
 }
 
 int queue_count(struct Queue * const q, int64_t * const countp) {
 	assert(q != NULL);
 	assert(count != NULL);
-	if (NULL == q->readItr) {
-		q->readItr= leveldb_create_iterator(q->db,q->rop);
-	}
-	leveldb_iter_seek_to_last(q->readItr);
-	if (0 == leveldb_iter_valid(q->readItr)) {
-		*countp = 0;
-		return LIBQUEUE_SUCCESS;
-	}
-	u_int64_t lastQIndex = getKeyFromIter(q->readItr);
-	leveldb_iter_seek_to_first(q->readItr);
-	u_int64_t firstQIndex = getKeyFromIter(q->readItr);
-	*countp = lastQIndex -firstQIndex +1; //add 1 because zero indexed;
+	*countp=1;
 	return LIBQUEUE_SUCCESS;
 
 }
 int queue_compact(struct Queue *q) {
 	assert(q != NULL);
-	u_int64_t starti = 0;
-	u_int64_t limiti = ULLONG_MAX;
-
-	const char * start = (const char *)&starti;
-	const char * limit = (const char *) & limiti;
-	leveldb_compact_range(q->db, start,sizeof (starti), limit, sizeof(limiti));
-	// TODO, figure out fast way to get size
 	return LIBQUEUE_SUCCESS;
-
 }
 
 int queue_len(struct Queue * const q, int64_t * const lenbuf) {
 	assert(q != NULL);
 	assert(lenbuf != NULL);
-	if (NULL == q->readItr) {
-		q->readItr= leveldb_create_iterator(q->db,q->rop);
-	}
-	leveldb_iter_seek_to_first(q->readItr);
-	if (0 == leveldb_iter_valid(q->readItr)) {
-		*lenbuf = 0;
-		return LIBQUEUE_SUCCESS;
-	}
-	size_t sizes[1]  = { 0 };
-	u_int64_t starti = 0;
-	u_int64_t limiti = ULLONG_MAX;
-
-	const char * start[1] = {(const char *)&starti };
-	size_t start_len[1] = { sizeof(u_int64_t)  };
-	const char * limit[1] = {(const char *)&limiti };
-	leveldb_approximate_sizes(q->db, 1, start,start_len, limit, start_len, sizes);
-	// TODO, figure out fast way to get size
-	*lenbuf= sizes[0];
+	*lenbuf =1;
 	return LIBQUEUE_SUCCESS;
 }
 
 int queue_peek(struct Queue * const q, int64_t idx, struct QueueData * const d) {
 	assert(q != NULL);
 	assert(d != NULL);
-	if (NULL == q->readItr )
-		q->readItr= leveldb_create_iterator(q->db,q->rop);
-	else {
-		leveldb_iter_seek_to_first(q->readItr);
-	}
-	while (idx)  {
-		if (0 == leveldb_iter_valid(q->readItr)) {
-			return LIBQUEUE_FAILURE;
-		}
-		leveldb_iter_next(q->readItr);
-		idx--;
-	}
-	if (0 == leveldb_iter_valid(q->readItr)) {
-		return LIBQUEUE_FAILURE;
-	}
-	d->v = (char *)leveldb_iter_value(q->readItr, &d->vlen);
 	return LIBQUEUE_SUCCESS;
 }
 int queue_poke(struct Queue *q, int64_t idx, struct QueueData *d){
 	assert(q != NULL);
 	assert(d != NULL);
 	assert(d->v != NULL);
-	if (NULL == q->readItr )
-		q->readItr= leveldb_create_iterator(q->db,q->rop);
-	else {
-		leveldb_iter_seek_to_first(q->readItr);
-	}
-	while (idx)  {
-		if (0 == leveldb_iter_valid(q->readItr)) {
-			return LIBQUEUE_FAILURE;
-		}
-		leveldb_iter_next(q->readItr);
-		idx--;
-	}
-	if (0 == leveldb_iter_valid(q->readItr)) {
-		return LIBQUEUE_FAILURE;
-	}
-	int key = getKeyFromIter(q->readItr);
-	leveldb_put(q->db, q->wop,(const char *)&key, sizeof(u_int64_t),d->v, d->vlen, &q->error_strp);
 	return LIBQUEUE_SUCCESS;
 }
 
