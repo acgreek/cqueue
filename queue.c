@@ -93,8 +93,13 @@ int openJournalAtTime(time_t time,const char * path, struct FileItr * itr) {
 struct CatelogEntry {
 	time_t time;
 	char done;
-	char pad[3];
 };
+struct JournalEntry {
+	unsigned long offset;
+	unsigned long size;
+	char done;
+};
+
 
 static void setCountLengthByStatingFiles(struct Queue *q) {
 	q->count =0;
@@ -107,14 +112,13 @@ static void setCountLengthByStatingFiles(struct Queue *q) {
 	if (NULL == journalsfd)
 		return ;
 	struct CatelogEntry entry;
-	while (!feof(journalsfd)) {
-		fread(&entry, sizeof(entry), 1, journalsfd);
+	while (1 == fread(&entry, sizeof(entry), 1, journalsfd)) {
 		if (entry.done != 0)
 			continue;
 		struct stat bin_stat, jour_stat;
 		if (0 == stat(getJournalFileName(entry.time, q->path, file), &jour_stat) &&
 				0 == stat(getBinLogFileName(entry.time, q->path, file), &bin_stat)) {
-			q->count += jour_stat.st_size / sizeof(entry) ;
+			q->count += jour_stat.st_size / sizeof(struct JournalEntry) ;
 			q->jour_size+= jour_stat.st_size;
 			q->bin_size+= bin_stat.st_size;
 		}
@@ -243,12 +247,6 @@ int queue_close(struct Queue *q) {
 	IFFN(q);
 	return LIBQUEUE_SUCCESS;
 }
-
-struct JournalEntry {
-	unsigned long offset;
-	unsigned long size;
-	char done;
-};
 
 int queue_push(struct Queue * const q, struct QueueData * const d) {
 	assert(q != NULL);
