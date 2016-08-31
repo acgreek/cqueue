@@ -33,6 +33,7 @@
 #define MAX_FILE_NAME 1024
 
 struct FileItr {
+	time_t time;
 	FILE *journalfd;
 	FILE *binlogfd;
 };
@@ -87,8 +88,10 @@ int openJournalAtTime(time_t time,const char * path, struct FileItr * itr) {
 	itr->binlogfd= fopen (getBinLogFileName(time, path, file), "r+");
 	if (NULL == itr->binlogfd)
 		itr->binlogfd= fopen (file, "w+");
+	itr->time = time;
 	return 0;
 }
+
 
 struct CatelogEntry {
 	time_t time;
@@ -163,7 +166,7 @@ static time_t newestEntry(struct Queue *q) {
 	fclose (journalsfd);
 	return ULONG_MAX == newest_entry.time ? 0 : newest_entry.time;
 }
-static void putEntry(struct Queue *q, time_t time) {
+static void setCatelogEntryDone(struct Queue *q,time_t time) {
 	char file[MAX_FILE_NAME];
 	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
 	FILE * journalsfd = fopen(file, "r+");
@@ -176,8 +179,30 @@ static void putEntry(struct Queue *q, time_t time) {
 		}
 	}
 	struct CatelogEntry entry;
-	while (!feof(journalsfd)) {
-		fread(&entry, sizeof(entry), 1, journalsfd);
+	while (1 == fread(&entry, sizeof(entry), 1, journalsfd)) {
+		if (time  == entry.time) {
+			fseek(journalsfd,-sizeof(entry), SEEK_CUR);
+			entry.done= 1;
+			fwrite(&entry, sizeof(entry), 1, journalsfd);
+			fflush(journalsfd);
+			break;
+		}
+	}
+	fclose (journalsfd);
+}
+static void putEntry(struct Queue *q, time_t time) {
+	char file[MAX_FILE_NAME];
+	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
+	FILE * journalsfd = fopen(file, "r+");
+	if (NULL == journalsfd){
+		journalsfd = fopen(file, "w+");
+		if (NULL == journalsfd){
+			fprintf(stderr, "error create catelog file %s: %s\n",file , strerror(errno));
+			return;
+		}
+	}
+	struct CatelogEntry entry;
+	while (1 == fread(&entry, sizeof(entry), 1, journalsfd)) {
 		if (1 == entry.done) {
 			fseek(journalsfd,-sizeof(entry), SEEK_CUR);
 			break;
@@ -185,11 +210,22 @@ static void putEntry(struct Queue *q, time_t time) {
 	}
 	entry.done= 0;
 	entry.time = time;
-	int out = fwrite(&entry, sizeof(entry), 1, journalsfd);
-	printf("wrote %d %d\n", out, sizeof(entry));
-	fclose (journalsfd);
+	fwrite(&entry, sizeof(entry), 1, journalsfd);
+	fflush(journalsfd);
+	fclose(journalsfd);
 }
 
+static void setFileToWriteTo(struct Queue * q) {
+	time_t last = newestEntry(q);
+	if (0 != last ) {
+		openJournalAtTime(last, q->path, &q->write);
+	}
+	else {
+		last = time(NULL);
+		putEntry(q, last);
+	}
+	openJournalAtTime(last, q->path, &q->write);
+}
 
 struct Queue * queue_open_with_options(const char * const path,... ) {
 	va_list argp;
@@ -202,18 +238,8 @@ struct Queue * queue_open_with_options(const char * const path,... ) {
 		return q;
 	}
 	q->path = strdup(path);
-
 	setCountLengthByStatingFiles(q);
-	time_t last = newestEntry(q);
-	if (0 != last ) {
-		openJournalAtTime(last, path, &q->write);
-		return q;
-	}
-	else {
-		last = time(NULL);
-		putEntry(q, last);
-	}
-	openJournalAtTime(last, path, &q->write);
+
 	return q;
 }
 struct Queue * queue_open(const char * const path) {
@@ -226,7 +252,6 @@ void queue_repair_with_options(const char * const path,... ) {
 	va_start(argp, path);
 	UNUSED struct Queue * q = readoptions(argp);
 	va_end(argp);
-
 }
 void queue_repair(const char * path) {
 	return queue_repair_with_options(path,NULL);
@@ -252,14 +277,20 @@ int queue_push(struct Queue * const q, struct QueueData * const d) {
 	assert(q != NULL);
 	assert(d != NULL);
 	assert(d->v != NULL);
+	if (!fileItr_opened(&q->write))
+		setFileToWriteTo(q);
 	fseek(q->write.journalfd, 0, SEEK_END);
 	fseek(q->write.binlogfd, 0, SEEK_END);
 	struct JournalEntry entry;
 
 	entry.offset = ftell(q->write.binlogfd);
 	entry.size = d->vlen * fwrite(d->v, d->vlen, 1, q->write.binlogfd);
+	fflush(q->write.binlogfd);
 	entry.done = 0;
 	fwrite((char *)&entry, sizeof(entry), 1, q->write.journalfd);
+
+	fflush(q->write.journalfd);
+	q->count++;
 	return LIBQUEUE_SUCCESS;
 }
 
@@ -272,41 +303,49 @@ int queue_pop(struct Queue * const q, struct QueueData * const d) {
 		if (0 ==oldest) {
 			return LIBQUEUE_FAILURE;
 		}
-
 		openJournalAtTime(oldest, q->path, &q->read);
+	}
+	if (!fileItr_opened(&q->read)) {
+		return LIBQUEUE_FAILURE;
+
 	}
 	struct JournalEntry  je;
 	int read=0;
-	while (!feof(q->read.journalfd)) {
-		read++;
-		int readsize= fread(&je, sizeof(je),1,q->read.journalfd );
-		if (0 == readsize ) {
-			// mark current journal file done and pick up another try again
-			//
-			return LIBQUEUE_FAILURE;
-		}
+	while (1 == fread(&je, sizeof(je),1,q->read.journalfd )) {
 		if (0 == je.done ) {
+			read++;
 			break;
 		}
 	}
 	if (0 == read) {
-		// mark current journal file done and pick up another try again
-		//
-		return LIBQUEUE_FAILURE;
+		if (q->write.time == q->read.time) {
+			// not done with file yet
+			return LIBQUEUE_FAILURE;
+		}
+		char file[MAX_FILE_NAME];
+		closeFileItr(&q->read);
+		unlink(getBinLogFileName(q->read.time, q->path, file));
+		unlink(getJournalFileName(q->read.time, q->path, file));
+		setCatelogEntryDone(q,q->read.time);
+		return queue_pop(q,d);
 	}
 	fseek(q->read.journalfd, -sizeof (je),  SEEK_CUR );
-	d->vlen = je.size;
-	d->v = malloc (d->vlen );
-	fseek(q->read.binlogfd, je.offset,  SEEK_SET);
-	fread(d->v,  d->vlen,1, q->read.binlogfd);
+	if (d) {
+		d->vlen = je.size;
+		d->v = malloc (d->vlen );
+		fseek(q->read.binlogfd, je.offset,  SEEK_SET);
+		fread(d->v,  d->vlen,1, q->read.binlogfd);
+	}
 	je.done = 1;
 	fwrite(&je, sizeof(je),1,q->read.journalfd );
+	fflush(q->read.journalfd);
+	q->count--;
 	return LIBQUEUE_SUCCESS;
 }
 
 int queue_count(struct Queue * const q, int64_t * const countp) {
 	assert(q != NULL);
-	assert(count != NULL);
+	assert(countp != NULL);
 	*countp=q->count;
 	return LIBQUEUE_SUCCESS;
 
