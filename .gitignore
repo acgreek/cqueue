@@ -14,4 +14,5 @@ qpoke
 qpop
 qpush
 qtest
+bench
 install_manifest.txt
