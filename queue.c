@@ -293,9 +293,9 @@ int queue_push(struct Queue * const q, struct QueueData * const d) {
 	q->count++;
 	return LIBQUEUE_SUCCESS;
 }
-
-int queue_pop(struct Queue * const q, struct QueueData * const d) {
+static int queue_peek_h(struct Queue * const q, int64_t idx, struct QueueData * const d,struct JournalEntry  *je) {
 	assert(q != NULL);
+	assert(d != NULL);
 	if (NULL == q->read.journalfd ) {
 	}
 	if (0 ==  fileItr_opened(&q->read) ) {
@@ -309,10 +309,9 @@ int queue_pop(struct Queue * const q, struct QueueData * const d) {
 		return LIBQUEUE_FAILURE;
 
 	}
-	struct JournalEntry  je;
 	int read=0;
-	while (1 == fread(&je, sizeof(je),1,q->read.journalfd )) {
-		if (0 == je.done ) {
+	while (1 == fread(je, sizeof(struct JournalEntry),1,q->read.journalfd )) {
+		if (0 == je->done ) {
 			read++;
 			break;
 		}
@@ -329,13 +328,24 @@ int queue_pop(struct Queue * const q, struct QueueData * const d) {
 		setCatelogEntryDone(q,q->read.time);
 		return queue_pop(q,d);
 	}
-	fseek(q->read.journalfd, -sizeof (je),  SEEK_CUR );
+	fseek(q->read.journalfd, -sizeof (struct JournalEntry),  SEEK_CUR );
 	if (d) {
-		d->vlen = je.size;
+		d->vlen = je->size;
 		d->v = malloc (d->vlen );
-		fseek(q->read.binlogfd, je.offset,  SEEK_SET);
+		fseek(q->read.binlogfd, je->offset,  SEEK_SET);
 		fread(d->v,  d->vlen,1, q->read.binlogfd);
 	}
+	return LIBQUEUE_SUCCESS;
+}
+int queue_peek(struct Queue * const q, int64_t idx, struct QueueData * const d) {
+	struct JournalEntry  je;
+	return queue_peek_h(q, idx, d,&je);
+}
+
+int queue_pop(struct Queue * const q, struct QueueData * const d) {
+	struct JournalEntry  je;
+	if (LIBQUEUE_SUCCESS != queue_peek_h(q,0, d,&je))
+		return LIBQUEUE_FAILURE;
 	je.done = 1;
 	fwrite(&je, sizeof(je),1,q->read.journalfd );
 	fflush(q->read.journalfd);
@@ -362,11 +372,6 @@ int queue_len(struct Queue * const q, int64_t * const lenbuf) {
 	return LIBQUEUE_SUCCESS;
 }
 
-int queue_peek(struct Queue * const q, int64_t idx, struct QueueData * const d) {
-	assert(q != NULL);
-	assert(d != NULL);
-	return LIBQUEUE_SUCCESS;
-}
 int queue_poke(struct Queue *q, int64_t idx, struct QueueData *d){
 	assert(q != NULL);
 	assert(d != NULL);
