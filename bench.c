@@ -7,7 +7,7 @@
 #include <time.h>
 
 int main(int argc, char **argv) {
-	size_t bufSize= 10*1024*1024;
+	size_t bufSize= 100*1024*1024;
 	size_t blockSize= 1024;
 	struct Queue *q;
 	char template[] = "/tmp/qtest_XXXXXX";
@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
 		puts("failed to create temp dir for running tests");
 		return 1;
 	}
-    q = queue_open(template);
+    q = queue_open_with_options(template,"maxBinLogSize", 10000000, NULL);
     if(0 == queue_is_opened(q)) {
         fprintf(stderr,"Failed to open the queue:%s", queue_get_last_error(q));
         queue_close(q);
