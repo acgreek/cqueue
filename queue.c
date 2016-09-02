@@ -366,8 +366,7 @@ static int queue_peek_h(struct Queue * const q, int64_t idx, struct QueueData * 
 		}
 	}
 	if (0 == read) {
-		if (q->write.time == q->read.time) {
-			// not done with file yet
+		if (q->write.time == q->read.time && q->write.clock == q->read.clock) {
 			return LIBQUEUE_FAILURE;
 		}
 		char file[MAX_FILE_NAME];
