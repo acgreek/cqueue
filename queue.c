@@ -124,6 +124,23 @@ struct JournalEntry {
 	char done;
 };
 
+static ssize_t removeDeleteed(const char * file) {
+	FILE * cf = fopen(file, "r");
+	if (NULL == cf)
+		return 0;
+	struct JournalEntry je;
+	ssize_t delCount=0;
+	while (1 == fread(&je, sizeof(je),1, cf)) {
+		if (0 == je.done)
+			break;
+		delCount++;
+
+	}
+	fclose(cf);
+	return delCount;
+
+
+}
 
 static void setCountLengthByStatingFiles(struct Queue *q) {
 	q->count =0;
@@ -143,6 +160,7 @@ static void setCountLengthByStatingFiles(struct Queue *q) {
 		if (0 == stat(getJournalFileName(entry.time,entry.clock, q->path, file), &jour_stat) &&
 				0 == stat(getBinLogFileName(entry.time,entry.clock,  q->path, file), &bin_stat)) {
 			q->count += jour_stat.st_size / sizeof(struct JournalEntry) ;
+			q->count -=removeDeleteed(getJournalFileName(entry.time,entry.clock, q->path, file));
 			q->jour_size+= jour_stat.st_size;
 			q->bin_size+= bin_stat.st_size;
 		}
