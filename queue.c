@@ -434,7 +434,10 @@ int queue_compact(struct Queue *q) {
 int queue_len(struct Queue * const q, int64_t * const lenbuf) {
 	assert(q != NULL);
 	assert(lenbuf != NULL);
-	*lenbuf =q->jour_size + q->bin_size + q->catalog_size;
+	if (0 == q->count )
+		*lenbuf = 0;
+	else
+		*lenbuf =q->jour_size + q->bin_size + q->catalog_size;
 	return LIBQUEUE_SUCCESS;
 }
 

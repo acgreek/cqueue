@@ -12,9 +12,6 @@ stack-based API:
 * <code>pop()</code> -- pop data from the queue
 * <code>peek()</code> -- retrieve data from a given stack index
 
-The data itself is stored using leveldb in a compressed
-hash tree. 
-
 API Overview
 ============
 
@@ -51,40 +48,15 @@ struct Queue *  queue_open(const char *path);
 
 
 /*
-  Same as queue_open but allow one to provde options for various settings internal 
-  to leveldb. The vararg must be terminated by a NULL to indicate end of options
+  Same as queue_open but allow one to provde options for various settings 
+  The vararg must be terminated by a NULL to indicate end of options
 
   options are to be provided as strings with some requiring args
 
   available options:
-  "failIfMissing" 
+	maxBinLogSize     byte size of the binlog, smaller binlogs cost performance in that as the queue grows and strinks, the more files will be created and destroyed. Larger binlog will use up more disk space for when the entries are deleted 
+	
 
-  if the database doesn't already exist, the database will not be created and error 
-  status is returned
-
-  "paranoidChecks"
-
-  various paranoid checks will be done with every operation 
-
-  "writeBufferSize"
-
-  must be followed by size_t value. this is the write buffer size of leveldb
-
-  "blockSize" 
-
-  must be followed by size_t value. this is the block size of leveldb
-
-  "blockRestartInterval" 
-
-  must be followed by size_t value. this is the block restart interval of leveldb
-
-  "maxOpenFiles" 
-
-  must be followed by int value. max open file handles used by leveldb
-
-  "noCompess" 
-
-  disables compression
  */
 struct Queue *  queue_open_with_options(const char *path,..., NULL);
 
@@ -104,8 +76,8 @@ int queue_push(struct Queue *q, struct QueueData *d);
 int queue_pop(struct Queue *q, struct QueueData *d);
 
 /*
-  returns approximate leveldb size if there is at least one element ready 
-  for reading in queue, other wise returns 0
+  returns total size of all files used by the queue unless there are zero elements 
+  in which it will return 0
 
 */
 int queue_len(struct Queue *q, int64_t *len);
@@ -148,10 +120,9 @@ Building
 ========
 
 Dependencies:
+none
 
-* libleveldb  (on ubuntu, apt get install libleveldb-dev)
-
-libqueue uses the cmake for building:
+libqueue uses cmake for building:
 
 cmake .
 make 
@@ -168,7 +139,7 @@ It's very simple: Use
 in your C program and link it with
 
 ```sh
--lqueue -lleveldb
+-lqueue 
 ```
 given that libqueue was installed into the default linker search path.
 
@@ -197,8 +168,7 @@ prints the string to stdout and exists with the status code 0.
 qlen
 ----
 
-if there are no elements, then 0 is returned, otherwise approximate length 
-from leveldb is provided
+if there are no entries, then zero is returned or else the total size of all file used by the queue is returned
 
 qcount
 ----
@@ -207,11 +177,12 @@ number of elments in the queue
 
 qcompact
 ----
-compact the queue on the file system to use less diskspace
+not used
 
 qrepair 
 ----
-repair a broken leveldb
+not implemented
+
 
 qpeek
 -----
