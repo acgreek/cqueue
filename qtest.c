@@ -4,39 +4,24 @@
 #include <libgen.h>
 #include <string.h>
 
-int main(int argc, char **argv) {
-	struct Queue *q;
-	int32_t ft = 42;
+void henry_push_test(struct Queue *q) {
 	struct QueueData qd = { "HENRY" , sizeof("HENRY") };
 	struct QueueData qd2;
-	puts(argv[0]);
-
-	char template[] = "/tmp/qtest_XXXXXX";
-	if (NULL == mkdtemp(template)) {
-		puts("failed to create temp dir for running tests");
-		return 1;
-	}
-
-    q = queue_open(template);
-    if(0 == queue_is_opened(q)) {
-        fprintf(stderr,"Failed to open the queue:%s", queue_get_last_error(q));
-        queue_close(q);
-        return EXIT_FAILURE;
-    }
-
 	puts("queue successfully opened!");
-
 	if(queue_push(q, &qd) != 0)
 		puts("pushing HENRY failed!");
-
 	if(queue_pop(q, &qd2) != 0) {
 		puts("popping HENRY failed!");
 	} else {
 		puts("here's what popped!");
 		puts((const char*)qd2.v);
 		free(qd2.v);
-	}
-
+    }
+}
+void  int32_push_test(struct Queue *q) {
+	struct QueueData qd = { "HENRY" , sizeof("HENRY") };
+	struct QueueData qd2;
+	int32_t ft = 42;
 	qd.v = &ft;
 	qd.vlen = sizeof(int32_t);
 	queue_push(q, &qd);
@@ -44,7 +29,9 @@ int main(int argc, char **argv) {
 	printf("popping forty-two: %d\n", *(int32_t*)qd2.v);
 	if (qd2.v)
 		free(qd2.v);
-
+}
+void fill15_test(struct Queue *q) {
+	struct QueueData qd2;
 	int i;
 	char buffer[1024];
 	for (i = 0; i < 15; i++) {
@@ -78,6 +65,11 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "ERROR: there should be 15 in the queue but got back %lld\n", (long long unsigned)count);
     }
 	for (i = 0; i < 15; i++) {
+        ssize_t count;
+        queue_count(q, &count);
+        if (15- i != count) {
+            fprintf(stderr, "ERROR: while popping off queue, expected %d but got %d\n", (int) 15-i,(int)count );
+        }
 		queue_pop(q, NULL);
 	}
     if (0 != queue_count(q, &count)) {
@@ -85,11 +77,41 @@ int main(int argc, char **argv) {
     if (0 != count) {
 		fprintf(stderr, "ERROR: there should be 0 in the queue but got back %lld\n", (long long unsigned)count);
     }
+}
+
+int main(int argc, char **argv) {
+	struct Queue *q;
+	puts(argv[0]);
+
+	char template[] = "/tmp/qtest_XXXXXX";
+	if (NULL == mkdtemp(template)) {
+		puts("failed to create temp dir for running tests");
+		return 1;
+	}
+    q = queue_open(template);
+    if(0 == queue_is_opened(q)) {
+        fprintf(stderr,"Failed to open the queue:%s", queue_get_last_error(q));
+        queue_close(q);
+        return EXIT_FAILURE;
+    }
+    queue_close(q);
+    for (int i=1; i < 20; i++  ) {
+        q = queue_open_with_options(template, "maxBinLogSize", i,NULL);
+        fill15_test(q);
+        queue_close(q);
+    }
+    q = queue_open(template);
+
+    henry_push_test(q);
+    int32_push_test(q);
+    fill15_test(q);
+
 
 	if(queue_close(q) != 0)
 		puts("there was an error closing the queue!");
 	puts("queue successfully closed!");
-	//TODO lazy
+
+    // lets delete the queue
 	char cmdline[1024];
 	sprintf(cmdline, "rm -rf %s", template);
 	int resultsOfDelete = system(cmdline);
@@ -100,7 +122,6 @@ int main(int argc, char **argv) {
 	q=queue_open_with_options(template,"failIfMissing", NULL);
 	if (NULL == queue_get_last_error(q)) {
 		puts("queue was created when it shouldn't have been");
-
 	}
     queue_close(q);
 	return 0;

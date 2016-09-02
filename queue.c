@@ -50,6 +50,7 @@ struct Queue {
 	struct FileItr read;
 	struct FileItr write;
 	char * error_strp;
+	char   fail_if_missing;
 	size_t count; // at startup we get the count by reading all the journals, then inc/dec as we push and pop
 	size_t jour_size; //  at startup we get the count by reading all the journal bin log size, then inc/dec as we push and pop
 	size_t bin_size; //  at startup we get the count by reading all the journal bin log size, then inc/dec as we push and pop
@@ -73,6 +74,9 @@ static struct Queue * readoptions (va_list argp) {
 	for (p = va_arg(argp, char *); p != NULL; p = va_arg(argp,char *)) {
 		if (0 == strcmp(p, "maxBinLogSize")) {
 			q->max_bin_log_size= va_arg(argp, size_t);
+		}
+		if (0 == strcmp(p, "failIfMissing")) {
+		   q-> fail_if_missing = 1;
 		}
 	}
 	return q;
@@ -149,9 +153,15 @@ static void setCountLengthByStatingFiles(struct Queue *q) {
 	q->catalog_size=0;
 	char file[MAX_FILE_NAME];
 	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
-	FILE * journalsfd = fopen(file, "r+");
-	if (NULL == journalsfd)
+	FILE * journalsfd;
+	if (q->fail_if_missing)
+		journalsfd = fopen(file, "r");
+	else
+		journalsfd = fopen(file, "r+");
+	if (NULL == journalsfd) {
+		q-> error_strp = strdup("failed to open catelog");
 		return ;
+	}
 	struct CatelogEntry entry;
 	while (1 == fread(&entry, sizeof(entry), 1, journalsfd)) {
 		if (entry.done != 0)
@@ -288,13 +298,11 @@ struct Queue * queue_open_with_options(const char * const path,... ) {
 	struct Queue * q = readoptions(argp);
 	va_end(argp);
 	if (F_OK != access(path, R_OK|W_OK)) {
-		printf("can't access: %s\n", path);
 		q-> error_strp = strdup("can not access path");
 		return q;
 	}
 	q->path = strdup(path);
 	setCountLengthByStatingFiles(q);
-
 	return q;
 }
 struct Queue * queue_open(const char * const path) {
@@ -324,6 +332,7 @@ int queue_close(struct Queue *q) {
 	closeFileItr(&q->read);
 	closeFileItr(&q->write);
 	IFFN(q->error_strp);
+	memset(q,0, sizeof(struct Queue));
 	IFFN(q);
 	return LIBQUEUE_SUCCESS;
 }
@@ -392,7 +401,7 @@ static int queue_peek_h(struct Queue * const q, int64_t idx, struct QueueData * 
 		unlink(getBinLogFileName(q->read.time,q->read.clock, q->path, file));
 		unlink(getJournalFileName(q->read.time,q->read.clock, q->path, file));
 		setCatelogEntryDone(q,q->read.time,q->read.clock);
-		return queue_pop(q,d);
+		return queue_peek_h(q,idx,d,je);
 	}
 	fseek(q->read.journalfd, -sizeof (struct JournalEntry),  SEEK_CUR );
 	if (d) {
