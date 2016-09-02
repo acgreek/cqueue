@@ -1,6 +1,6 @@
 - replace calls to time(NULL) with some incrementing number
--  handle case where number wraps back to zero
-- rotate to next file when max binlog exceeded
+-- handle case where number wraps back to zero
+D rotate to next file when max binlog exceeded
 - error handling fread, fwrite, fopen 
 - mkdir director for queue
 - UNIT TESTS broken scenarios
