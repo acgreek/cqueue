@@ -218,7 +218,7 @@ static FileKey getNextOldestJournal(struct Queue *q, FileKey *oldkey) {
 			oldest_entry = entry;
 		}
 	}
-	fclose (q->catalogFd);
+	fclose (q->catalogFd); q->catalogFd =NULL;
 	if (ULONG_MAX != oldest_entry.key.time) {
 		return oldest_entry.key;
 	}
@@ -234,19 +234,19 @@ static void newestEntry(struct Queue *q,time_t * timep, clock_t *clockp) {
 	*clockp=0;
 	char file[MAX_FILE_NAME];
 	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
-	FILE * journalsfd = fopen(file, "r+");
-	if (NULL == journalsfd)
+	q->catalogFd = fopen(file, "r+");
+	if (NULL == q->catalogFd)
 		return ;
 	struct catalogEntry entry;
 	struct catalogEntry newest_entry;
 	newest_entry.key.time = 0;
-	while (!feof(journalsfd)) {
-		fread(&entry, sizeof(entry), 1, journalsfd);
+	while (!feof(q->catalogFd)) {
+		fread(&entry, sizeof(entry), 1, q->catalogFd);
 		if (0 == entry.done && ( FILE_KEY_GREATER(entry.key,newest_entry.key))) {
 			newest_entry = entry;
 		}
 	}
-	fclose (journalsfd);
+	fclose (q->catalogFd);q->catalogFd=NULL;
 	if (0 != newest_entry.key.time) {
 		*timep = newest_entry.key.time;
 		*clockp= newest_entry.key.clock;
@@ -255,51 +255,51 @@ static void newestEntry(struct Queue *q,time_t * timep, clock_t *clockp) {
 static void setcatalogEntryDone(struct Queue *q,time_t time, clock_t clock) {
 	char file[MAX_FILE_NAME];
 	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
-	FILE * journalsfd = fopen(file, "r+");
-	if (NULL == journalsfd){
+	q->catalogFd = fopen(file, "r+");
+	if (NULL == q->catalogFd){
 		fprintf(stderr, "error opening catalog file %s: %s\n",file , strerror(errno));
-		journalsfd = fopen(file, "w+");
-		if (NULL == journalsfd){
+		q->catalogFd = fopen(file, "w+");
+		if (NULL == q->catalogFd){
 			fprintf(stderr, "error create catalog file %s: %s\n",file , strerror(errno));
 			return;
 		}
 	}
 	struct catalogEntry entry;
-	while (1 == fread(&entry, sizeof(entry), 1, journalsfd)) {
+	while (1 == fread(&entry, sizeof(entry), 1,q->catalogFd)) {
 		if (time  == entry.key.time && clock == entry.key.clock) {
-			fseek(journalsfd,-sizeof(entry), SEEK_CUR);
+			fseek(q->catalogFd,-sizeof(entry), SEEK_CUR);
 			entry.done= 1;
-			fwrite(&entry, sizeof(entry), 1, journalsfd);
-			fflush(journalsfd);
+			fwrite(&entry, sizeof(entry), 1, q->catalogFd);
+			fflush(q->catalogFd);
 			break;
 		}
 	}
-	fclose (journalsfd);
+	fclose (q->catalogFd);q->catalogFd=NULL;
 }
 static void putEntry(struct Queue *q, time_t time, clock_t ct) {
 	char file[MAX_FILE_NAME];
 	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
-	FILE * journalsfd = fopen(file, "r+");
-	if (NULL == journalsfd){
-		journalsfd = fopen(file, "w+");
-		if (NULL == journalsfd){
+	q->catalogFd= fopen(file, "r+");
+	if (NULL == q->catalogFd){
+		q->catalogFd= fopen(file, "w+");
+		if (NULL ==q->catalogFd){
 			fprintf(stderr, "error create catalog file %s: %s\n",file , strerror(errno));
 			return;
 		}
 	}
 	struct catalogEntry entry;
-	while (1 == fread(&entry, sizeof(entry), 1, journalsfd)) {
+	while (1 == fread(&entry, sizeof(entry), 1,q->catalogFd)) {
 		if (1 == entry.done) {
-			fseek(journalsfd,-sizeof(entry), SEEK_CUR);
+			fseek(q->catalogFd,-sizeof(entry), SEEK_CUR);
 			break;
 		}
 	}
 	entry.done= 0;
 	entry.key.time = time;
 	entry.key.clock = ct;
-	fwrite(&entry, sizeof(entry), 1, journalsfd);
-	fflush(journalsfd);
-	fclose(journalsfd);
+	fwrite(&entry, sizeof(entry), 1,q->catalogFd);
+	fflush(q->catalogFd);
+	fclose(q->catalogFd);q->catalogFd=NULL;
 }
 
 static void setFileToWriteTo(struct Queue * q) {
@@ -351,6 +351,8 @@ int queue_close(struct Queue *q) {
 	IFFN(q->path);
 	closeFileItr(&q->read);
 	closeFileItr(&q->write);
+	if (NULL != q->catalogFd)
+		fclose(q->catalogFd);
 	IFFN(q->error_strp);
 	memset(q,0, sizeof(struct Queue));
 	IFFN(q);
