@@ -175,22 +175,13 @@ static ssize_t doneEntries(const char * file) {
 
 static void setCountLengthByStatingFiles(struct Queue *q) {
 	q->count = q->jour_size= q->bin_size= q->catalog_size=0;
-	char file[MAX_FILE_NAME];
-	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
-	FILE * journalsfd;
-	if (q->fail_if_missing)
-		journalsfd = fopen(file, "r");
-	else
-		journalsfd = fopen(file, "r+");
-	if (NULL == journalsfd) {
-		q-> error_strp = strdup("failed to open catalog");
-		return ;
-	}
+	fseek(q->catalogFd, 0, SEEK_SET);
 	struct catalogEntry entry;
-	while (1 == fread(&entry, sizeof(entry), 1, journalsfd)) {
+	while (1 == fread(&entry, sizeof(entry), 1,q->catalogFd)) {
 		if (entry.done != 0)
 			continue;
 		struct stat bin_stat, jour_stat;
+		char file[MAX_FILE_NAME];
 		if (0 == stat(getJournalFileName(&entry.key, q->path, file), &jour_stat) &&
 				0 == stat(getBinLogFileName(&entry.key,  q->path, file), &bin_stat)) {
 			q->count += jour_stat.st_size / sizeof(struct JournalEntry) ;
@@ -199,7 +190,9 @@ static void setCountLengthByStatingFiles(struct Queue *q) {
 			q->bin_size+= bin_stat.st_size;
 		}
 	}
-	fclose (journalsfd);
+	struct stat cat_stat;
+	fstat(fileno(q->catalogFd), &cat_stat);
+	q->catalog_size+= cat_stat.st_size;
 }
 
 static FileKey getNextOldestJournal(struct Queue *q, FileKey *oldkey) {
@@ -273,8 +266,10 @@ static FILE * openCatalog(struct Queue *q) {
 static void putEntry(struct Queue *q, const FileKey const  * keyp) {
 	fseek(q->catalogFd, 0, SEEK_SET);
 	struct catalogEntry entry;
+	int replacing=0;
 	while (1 == fread(&entry, sizeof(entry), 1,q->catalogFd)) {
 		if (1 == entry.done) {
+			replacing=1;
 			fseek(q->catalogFd,-sizeof(entry), SEEK_CUR);
 			break;
 		}
@@ -283,6 +278,9 @@ static void putEntry(struct Queue *q, const FileKey const  * keyp) {
 	entry.key = *keyp;
 	fwrite(&entry, sizeof(entry), 1,q->catalogFd);
 	fflush(q->catalogFd);
+	if (0 == replacing) {
+		q->catalog_size  +=sizeof(entry);
+	}
 }
 
 static void setFileToWriteTo(struct Queue * q) {
