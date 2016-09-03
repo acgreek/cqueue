@@ -26,7 +26,9 @@
 #include <fcntl.h>
 #include <string.h>
 #include <time.h>
+#include <stdio.h>
 
+#define IFF(X) {if (NULL != X) {free(X);}}
 #define IFFN(X) {if (NULL != X) {free(X); X =NULL;}}
 #define IFFNF(X,FUNC) {if (NULL != X) {FUNC(X); X =NULL;}}
 
@@ -60,6 +62,12 @@ struct Queue {
 
 const char * queue_get_last_error(const struct Queue * const q) {
 	return q->error_strp;
+}
+void queue_set_error(struct Queue *const q, const char *what, const char *errstr) {
+	IFF(q->error_strp);
+	char * ptr;
+	asprintf(&ptr, "%s %s", what, errstr);
+	q->error_strp= ptr;
 }
 
 int queue_is_opened (const struct Queue * const q) {
@@ -367,11 +375,9 @@ int queue_push(struct Queue * const q, struct QueueData * const d) {
 	q->write.jsize += sizeof(entry);
 	return LIBQUEUE_SUCCESS;
 }
-static int queue_peek_h(struct Queue * const q, int64_t idx, struct QueueData * const d,struct JournalEntry  *je) {
+static int queue_peek_h(struct Queue * const q,  int64_t idx, struct QueueData * const d,struct JournalEntry  *je) {
 	assert(q != NULL);
 	assert(d != NULL);
-	if (NULL == q->read.journalfd ) {
-	}
 	if (0 ==  fileItr_opened(&q->read) ) {
 		time_t oldest ;
 		clock_t ct;
@@ -383,7 +389,6 @@ static int queue_peek_h(struct Queue * const q, int64_t idx, struct QueueData * 
 	}
 	if (!fileItr_opened(&q->read)) {
 		return LIBQUEUE_FAILURE;
-
 	}
 	int read=0;
 	while (1 == fread(je, sizeof(struct JournalEntry),1,q->read.journalfd )) {
@@ -398,8 +403,11 @@ static int queue_peek_h(struct Queue * const q, int64_t idx, struct QueueData * 
 		}
 		char file[MAX_FILE_NAME];
 		closeFileItr(&q->read);
-		unlink(getBinLogFileName(q->read.time,q->read.clock, q->path, file));
-		unlink(getJournalFileName(q->read.time,q->read.clock, q->path, file));
+		if (0 != unlink(getBinLogFileName(q->read.time,q->read.clock, q->path, file)) &&
+				0 != unlink(getJournalFileName(q->read.time,q->read.clock, q->path, file)))  {
+			queue_set_error(q, "failed to delete binlog or journal: ", strerror(errno));
+			return LIBQUEUE_FAILURE;
+		}
 		setCatelogEntryDone(q,q->read.time,q->read.clock);
 		return queue_peek_h(q,idx,d,je);
 	}
@@ -422,8 +430,14 @@ int queue_pop(struct Queue * const q, struct QueueData * const d) {
 	if (LIBQUEUE_SUCCESS != queue_peek_h(q,0, d,&je))
 		return LIBQUEUE_FAILURE;
 	je.done = 1;
-	fwrite(&je, sizeof(je),1,q->read.journalfd );
-	fflush(q->read.journalfd);
+	if (1 != fwrite(&je, sizeof(je),1,q->read.journalfd )){
+		queue_set_error(q, "failed to mark entry done: ", strerror(errno));
+		return LIBQUEUE_FAILURE;
+	}
+	if (0 != fflush(q->read.journalfd)) {
+		queue_set_error(q, "failed to flush mark entry done: ", strerror(errno));
+		return LIBQUEUE_FAILURE;
+	}
 	q->count--;
 	return LIBQUEUE_SUCCESS;
 }

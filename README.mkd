@@ -12,6 +12,13 @@ stack-based API:
 * <code>pop()</code> -- pop data from the queue
 * <code>peek()</code> -- retrieve data from a given stack index
 
+
+originally, I port libqueue from another github developer projects to use leveldb, but I found
+that queue_pop was extremely slow. I actually don't need or want the level's  or key value aspects 
+of level db so I wrote this as simple file based replacement.
+
+
+
 API Overview
 ============
 
