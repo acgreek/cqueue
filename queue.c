@@ -229,14 +229,15 @@ static FileKey getOldestJournal(struct Queue *q) {
 	return getNextOldestJournal(q,&key);
 }
 
-static void newestEntry(struct Queue *q,time_t * timep, clock_t *clockp) {
-	*timep=0;
-	*clockp=0;
+/**
+ * @return 1 if newest entry found, 0 there are no entries
+ */
+static int newestEntry(struct Queue *q,FileKey * key) {
 	char file[MAX_FILE_NAME];
 	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
 	q->catalogFd = fopen(file, "r+");
 	if (NULL == q->catalogFd)
-		return ;
+		return 0;
 	struct catalogEntry entry;
 	struct catalogEntry newest_entry;
 	newest_entry.key.time = 0;
@@ -248,9 +249,10 @@ static void newestEntry(struct Queue *q,time_t * timep, clock_t *clockp) {
 	}
 	fclose (q->catalogFd);q->catalogFd=NULL;
 	if (0 != newest_entry.key.time) {
-		*timep = newest_entry.key.time;
-		*clockp= newest_entry.key.clock;
+		*key = newest_entry.key;
+		return 1;
 	}
+	return 0;
 }
 static void setcatalogEntryDone(struct Queue *q,time_t time, clock_t clock) {
 	char file[MAX_FILE_NAME];
@@ -276,7 +278,7 @@ static void setcatalogEntryDone(struct Queue *q,time_t time, clock_t clock) {
 	}
 	fclose (q->catalogFd);q->catalogFd=NULL;
 }
-static void putEntry(struct Queue *q, time_t time, clock_t ct) {
+static void putEntry(struct Queue *q, const FileKey const  * keyp) {
 	char file[MAX_FILE_NAME];
 	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
 	q->catalogFd= fopen(file, "r+");
@@ -295,8 +297,7 @@ static void putEntry(struct Queue *q, time_t time, clock_t ct) {
 		}
 	}
 	entry.done= 0;
-	entry.key.time = time;
-	entry.key.clock = ct;
+	entry.key = *keyp;
 	fwrite(&entry, sizeof(entry), 1,q->catalogFd);
 	fflush(q->catalogFd);
 	fclose(q->catalogFd);q->catalogFd=NULL;
@@ -304,11 +305,10 @@ static void putEntry(struct Queue *q, time_t time, clock_t ct) {
 
 static void setFileToWriteTo(struct Queue * q) {
 	FileKey key;
-	newestEntry(q,&key.time,&key.clock);
-	if (0 == key.time) {
+	if (!newestEntry(q,&key)) {
 		key.time= time(NULL);
 		key.clock= clock();
-		putEntry(q, key.time,key.clock);
+		putEntry(q, &key);
 	}
 	openJournalAtTime(&key, q->path, &q->write);
 }
@@ -368,7 +368,7 @@ int queue_push(struct Queue * const q, struct QueueData * const d) {
 	if (q->write.bsize + d->vlen > q->max_bin_log_size ) {
 		closeFileItr (&q->write);
 		FileKey key= {time(NULL), clock()};
-		putEntry(q, key.time,key.clock);
+		putEntry(q, &key);
 		openJournalAtTime(&key, q->path, &q->write);
 	}
 
