@@ -35,14 +35,14 @@
 
 #define MAX_FILE_NAME 1024
 
+#define FILE_KEY_EQUAL(A,B) (A.time == B.time && A.clock == B.clock)
+#define FILE_KEY_GREATER(A,B) ((unsigned long)A.time > (unsigned long)B.time || (A.time == B.time && (unsigned long)A.clock > (unsigned long)B.clock))
+#define FILE_KEY_LESS(A,B) ((unsigned long)A.time < (unsigned long)B.time || ((unsigned long)A.time == (unsigned long)B.time && (unsigned long)A.clock < (unsigned long)B.clock))
+
 typedef struct _FileKey {
 	time_t time;
 	time_t clock;
 }FileKey;
-
-#define FILE_KEY_EQUAL(A,B) (A.time == B.time && A.clock == B.clock)
-#define FILE_KEY_GREATER(A,B) ((unsigned long)A.time > (unsigned long)B.time || (A.time == B.time && (unsigned long)A.clock > (unsigned long)B.clock))
-#define FILE_KEY_LESS(A,B) ((unsigned long)A.time < (unsigned long)B.time || ((unsigned long)A.time == (unsigned long)B.time && (unsigned long)A.clock < (unsigned long)B.clock))
 
 struct FileItr {
 	FileKey key;
@@ -53,9 +53,6 @@ struct FileItr {
 	ssize_t bsize;
 };
 
-int fileItr_opened(struct FileItr *itrp ) {
-	return itrp->journalfd != NULL;
-}
 
 struct Queue {
 	char * path;
@@ -79,10 +76,25 @@ struct Queue {
 	char   fail_if_missing;
 };
 
+struct catalogEntry {
+	FileKey key;
+	char done;
+};
+
+struct JournalEntry {
+	unsigned long offset;
+	unsigned long size;
+	char done;
+};
+
+int fileItr_opened(struct FileItr *itrp ) {
+	return itrp->journalfd != NULL;
+}
+
 const char * queue_get_last_error(const struct Queue * const q) {
 	return q->error_strp;
 }
-void queue_set_error(struct Queue *const q, const char *what, const char *errstr) {
+static void queue_set_error(struct Queue *const q, const char *what, const char *errstr) {
 	IFF(q->error_strp);
 	char * ptr;
 	asprintf(&ptr, "%s %s", what, errstr);
@@ -143,19 +155,8 @@ static int openJournalAtTime(FileKey * keyp, const char * path, struct FileItr *
 	return 0;
 }
 
-struct catalogEntry {
-	FileKey key;
-	char done;
-};
-
-struct JournalEntry {
-	unsigned long offset;
-	unsigned long size;
-	char done;
-};
-
 /**
- * @return number of entries in the binlog that are done
+ * @return number of entries in the journal that are marked done
  */
 static ssize_t doneEntries(const char * file) {
 	FILE * cf = fopen(file, "r");
@@ -315,12 +316,19 @@ struct Queue * queue_open(const char * const path) {
 	return queue_open_with_options(path,NULL);
 }
 
+/**
+ * not implemented yet
+ */
 void queue_repair_with_options(const char * const path,... ) {
 	va_list argp;
 	va_start(argp, path);
 	UNUSED struct Queue * q = readoptions(argp);
 	va_end(argp);
 }
+
+/**
+ * not implemented yet
+ */
 void queue_repair(const char * path) {
 	return queue_repair_with_options(path,NULL);
 }
@@ -375,6 +383,7 @@ int queue_push(struct Queue * const q, struct QueueData * const d) {
 	q->write.jsize += sizeof(entry);
 	return LIBQUEUE_SUCCESS;
 }
+
 static int queue_peek_h(struct Queue * const q,  int64_t idx, struct QueueData * const d,struct JournalEntry  *je) {
 	assert(q != NULL);
 	assert(d != NULL);
@@ -418,6 +427,10 @@ static int queue_peek_h(struct Queue * const q,  int64_t idx, struct QueueData *
 	}
 	return LIBQUEUE_SUCCESS;
 }
+
+/**
+ * NOTE, you can only peek 0, idx not implemented yet
+ */
 int queue_peek(struct Queue * const q, int64_t idx, struct QueueData * const d) {
 	struct JournalEntry  je;
 	return queue_peek_h(q, idx, d,&je);
@@ -447,6 +460,10 @@ int queue_count(struct Queue * const q, int64_t * const countp) {
 	return LIBQUEUE_SUCCESS;
 
 }
+
+/**
+ * not implemented
+ */
 int queue_compact(struct Queue *q) {
 	assert(q != NULL);
 	return LIBQUEUE_SUCCESS;
@@ -462,6 +479,9 @@ int queue_len(struct Queue * const q, int64_t * const lenbuf) {
 	return LIBQUEUE_SUCCESS;
 }
 
+/**
+ * not implemented
+ */
 int queue_poke(struct Queue *q, int64_t idx, struct QueueData *d){
 	assert(q != NULL);
 	assert(d != NULL);
