@@ -207,8 +207,7 @@ static FileKey getNextOldestJournal(struct Queue *q, FileKey *oldkey) {
 	struct catalogEntry entry;
 	struct catalogEntry oldest_entry = {{ULONG_MAX,ULONG_MAX}, 0 };
 	fseek(q->catalogFd, 0, SEEK_SET);
-	while (!feof(q->catalogFd)) {
-		fread(&entry, sizeof(entry), 1, q->catalogFd);
+	while (1 == fread(&entry, sizeof(entry), 1, q->catalogFd)) {
 		if (0 == entry.done && FILE_KEY_LESS(entry.key,oldest_entry.key) &&
 				FILE_KEY_GREATER(entry.key, (*oldkey))) {
 			oldest_entry = entry;
@@ -228,21 +227,15 @@ static FileKey getOldestJournal(struct Queue *q) {
  * @return 1 if newest entry found, 0 there are no entries
  */
 static int newestEntry(struct Queue *q,FileKey * key) {
-	char file[MAX_FILE_NAME];
-	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
-	q->catalogFd1 = fopen(file, "r+");
-	if (NULL == q->catalogFd1)
-		return 0;
 	struct catalogEntry entry;
 	struct catalogEntry newest_entry;
 	newest_entry.key.time = 0;
-	while (!feof(q->catalogFd1)) {
-		fread(&entry, sizeof(entry), 1, q->catalogFd1);
+	fseek(q->catalogFd, 0, SEEK_SET);
+	while (1 == fread(&entry, sizeof(entry), 1, q->catalogFd)) {
 		if (0 == entry.done && ( FILE_KEY_GREATER(entry.key,newest_entry.key))) {
 			newest_entry = entry;
 		}
 	}
-	fclose (q->catalogFd1);q->catalogFd1=NULL;
 	if (0 != newest_entry.key.time) {
 		*key = newest_entry.key;
 		return 1;
