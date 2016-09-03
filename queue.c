@@ -256,28 +256,17 @@ static int newestEntry(struct Queue *q,FileKey * key) {
 	return 0;
 }
 static void setcatalogEntryDone(struct Queue *q,time_t time, clock_t clock) {
-	char file[MAX_FILE_NAME];
-	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
-	q->catalogFd1 = fopen(file, "r+");
-	if (NULL == q->catalogFd1){
-		fprintf(stderr, "error opening catalog file %s: %s\n",file , strerror(errno));
-		q->catalogFd1 = fopen(file, "w+");
-		if (NULL == q->catalogFd1){
-			fprintf(stderr, "error create catalog file %s: %s\n",file , strerror(errno));
-			return;
-		}
-	}
+	fseek(q->catalogFd, 0, SEEK_SET);
 	struct catalogEntry entry;
-	while (1 == fread(&entry, sizeof(entry), 1,q->catalogFd1)) {
+	while (1 == fread(&entry, sizeof(entry), 1,q->catalogFd)) {
 		if (time  == entry.key.time && clock == entry.key.clock) {
-			fseek(q->catalogFd1,-sizeof(entry), SEEK_CUR);
+			fseek(q->catalogFd,-sizeof(entry), SEEK_CUR);
 			entry.done= 1;
-			fwrite(&entry, sizeof(entry), 1, q->catalogFd1);
-			fflush(q->catalogFd1);
+			fwrite(&entry, sizeof(entry), 1, q->catalogFd);
+			fflush(q->catalogFd);
 			break;
 		}
 	}
-	fclose (q->catalogFd1);q->catalogFd1=NULL;
 }
 static FILE * openCatalog(struct Queue *q) {
 	char file[MAX_FILE_NAME];
