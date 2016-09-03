@@ -31,12 +31,20 @@
 #define IFF(X) {if (NULL != X) {free(X);}}
 #define IFFN(X) {if (NULL != X) {free(X); X =NULL;}}
 #define IFFNF(X,FUNC) {if (NULL != X) {FUNC(X); X =NULL;}}
+#define UNUSED __attribute__((unused))
 
 #define MAX_FILE_NAME 1024
 
-struct FileItr {
+typedef struct _FileKey {
 	time_t time;
 	time_t clock;
+}FileKey;
+#define FILE_KEY_EQUAL(A,B) (A.time == B.time && A.clock == B.clock)
+#define FILE_KEY_GREATER(A,B) (A.time > B.time || (A.time == B.time && A.clock > B.clock))
+
+struct FileItr {
+	FileKey key;
+	ssize_t catalogIdx;
 	FILE *journalfd;
 	FILE *binlogfd;
 	ssize_t jsize;
@@ -51,13 +59,19 @@ struct Queue {
 	char * path;
 	struct FileItr read;
 	struct FileItr write;
+
+	// error string holder
 	char * error_strp;
-	char   fail_if_missing;
+
+	// stats
 	size_t count; // at startup we get the count by reading all the journals, then inc/dec as we push and pop
 	size_t jour_size; //  at startup we get the count by reading all the journal bin log size, then inc/dec as we push and pop
 	size_t bin_size; //  at startup we get the count by reading all the journal bin log size, then inc/dec as we push and pop
 	size_t catalog_size; //  at startup we get the count by reading all the journal bin log size, then inc/dec as we push and pop
+
+	//settings
 	size_t max_bin_log_size; //
+	char   fail_if_missing;
 };
 
 const char * queue_get_last_error(const struct Queue * const q) {
@@ -109,7 +123,7 @@ static ssize_t getFileSize(FILE * fd) {
 	return stat.st_size;
 }
 
-int openJournalAtTime(time_t time,clock_t clock, const char * path, struct FileItr * itr) {
+static int openJournalAtTime(time_t time,clock_t clock, const char * path, struct FileItr * itr) {
 	char file[MAX_FILE_NAME];
 	itr->journalfd = fopen (getJournalFileName(time,clock, path, file), "r+");
 	if (NULL == itr->journalfd)
@@ -120,14 +134,13 @@ int openJournalAtTime(time_t time,clock_t clock, const char * path, struct FileI
 	if (NULL == itr->binlogfd)
 		itr->binlogfd= fopen (file, "w+");
 	itr->bsize = getFileSize(itr->binlogfd);
-	itr->time = time;
-	itr->clock= clock;
+	itr->key.time = time;
+	itr->key.clock= clock;
 	return 0;
 }
 
-struct CatelogEntry {
-	time_t time;
-	clock_t clock;
+struct catalogEntry {
+	FileKey key;
 	char done;
 };
 struct JournalEntry {
@@ -136,7 +149,10 @@ struct JournalEntry {
 	char done;
 };
 
-static ssize_t removeDeleteed(const char * file) {
+/**
+ * @return number of entries in the binlog that are done
+ */
+static ssize_t doneEntries(const char * file) {
 	FILE * cf = fopen(file, "r");
 	if (NULL == cf)
 		return 0;
@@ -146,19 +162,13 @@ static ssize_t removeDeleteed(const char * file) {
 		if (0 == je.done)
 			break;
 		delCount++;
-
 	}
 	fclose(cf);
 	return delCount;
-
-
 }
 
 static void setCountLengthByStatingFiles(struct Queue *q) {
-	q->count =0;
-	q->jour_size=0;
-	q->bin_size=0;
-	q->catalog_size=0;
+	q->count = q->jour_size= q->bin_size= q->catalog_size=0;
 	char file[MAX_FILE_NAME];
 	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
 	FILE * journalsfd;
@@ -167,24 +177,23 @@ static void setCountLengthByStatingFiles(struct Queue *q) {
 	else
 		journalsfd = fopen(file, "r+");
 	if (NULL == journalsfd) {
-		q-> error_strp = strdup("failed to open catelog");
+		q-> error_strp = strdup("failed to open catalog");
 		return ;
 	}
-	struct CatelogEntry entry;
+	struct catalogEntry entry;
 	while (1 == fread(&entry, sizeof(entry), 1, journalsfd)) {
 		if (entry.done != 0)
 			continue;
 		struct stat bin_stat, jour_stat;
-		if (0 == stat(getJournalFileName(entry.time,entry.clock, q->path, file), &jour_stat) &&
-				0 == stat(getBinLogFileName(entry.time,entry.clock,  q->path, file), &bin_stat)) {
+		if (0 == stat(getJournalFileName(entry.key.time,entry.key.clock, q->path, file), &jour_stat) &&
+				0 == stat(getBinLogFileName(entry.key.time,entry.key.clock,  q->path, file), &bin_stat)) {
 			q->count += jour_stat.st_size / sizeof(struct JournalEntry) ;
-			q->count -=removeDeleteed(getJournalFileName(entry.time,entry.clock, q->path, file));
+			q->count -=doneEntries(getJournalFileName(entry.key.time,entry.key.clock, q->path, file));
 			q->jour_size+= jour_stat.st_size;
 			q->bin_size+= bin_stat.st_size;
 		}
 	}
 	fclose (journalsfd);
-
 }
 
 static void getOldestJournal(struct Queue *q,time_t * timep, clock_t *clockp) {
@@ -195,22 +204,22 @@ static void getOldestJournal(struct Queue *q,time_t * timep, clock_t *clockp) {
 	FILE * journalsfd = fopen(file, "r+");
 	if (NULL == journalsfd)
 		return;
-	struct CatelogEntry entry;
-	struct CatelogEntry oldest_entry;
-	oldest_entry.time = ULONG_MAX;
-	oldest_entry.clock= ULONG_MAX;
+	struct catalogEntry entry;
+	struct catalogEntry oldest_entry;
+	oldest_entry.key.time = ULONG_MAX;
+	oldest_entry.key.clock= ULONG_MAX;
 	while (!feof(journalsfd)) {
 		fread(&entry, sizeof(entry), 1, journalsfd);
-		if (0 == entry.done && (((unsigned long) entry.time) < (unsigned long)oldest_entry.time ||
-				((((unsigned long) entry.time) == (unsigned long)oldest_entry.time )
-				&& ((unsigned long) entry.clock) < (unsigned long)oldest_entry.clock))) {
+		if (0 == entry.done && (((unsigned long) entry.key.time) < (unsigned long)oldest_entry.key.time ||
+				((((unsigned long) entry.key.time) == (unsigned long)oldest_entry.key.time )
+				 && ((unsigned long) entry.key.clock) < (unsigned long)oldest_entry.key.clock))) {
 			oldest_entry = entry;
 		}
 	}
 	fclose (journalsfd);
-	if (ULONG_MAX != oldest_entry.time) {
-		*timep = oldest_entry.time;
-		*clockp= oldest_entry.clock;
+	if (ULONG_MAX != oldest_entry.key.time) {
+		*timep = oldest_entry.key.time;
+		*clockp= oldest_entry.key.clock;
 	}
 }
 
@@ -222,37 +231,37 @@ static void newestEntry(struct Queue *q,time_t * timep, clock_t *clockp) {
 	FILE * journalsfd = fopen(file, "r+");
 	if (NULL == journalsfd)
 		return ;
-	struct CatelogEntry entry;
-	struct CatelogEntry newest_entry;
-	newest_entry.time = 0;
+	struct catalogEntry entry;
+	struct catalogEntry newest_entry;
+	newest_entry.key.time = 0;
 	while (!feof(journalsfd)) {
 		fread(&entry, sizeof(entry), 1, journalsfd);
-		if (0 == entry.done && ( entry.time > newest_entry.time ||
-				(entry.time == newest_entry.time &&  entry.clock > newest_entry.clock))) {
+		if (0 == entry.done && ( entry.key.time > newest_entry.key.time ||
+				(entry.key.time == newest_entry.key.time &&  entry.key.clock > newest_entry.key.clock))) {
 			newest_entry = entry;
 		}
 	}
 	fclose (journalsfd);
-	if (0 != newest_entry.time) {
-		*timep = newest_entry.time;
-		*clockp= newest_entry.clock;
+	if (0 != newest_entry.key.time) {
+		*timep = newest_entry.key.time;
+		*clockp= newest_entry.key.clock;
 	}
 }
-static void setCatelogEntryDone(struct Queue *q,time_t time, clock_t clock) {
+static void setcatalogEntryDone(struct Queue *q,time_t time, clock_t clock) {
 	char file[MAX_FILE_NAME];
 	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
 	FILE * journalsfd = fopen(file, "r+");
 	if (NULL == journalsfd){
-		fprintf(stderr, "error opening catelog file %s: %s\n",file , strerror(errno));
+		fprintf(stderr, "error opening catalog file %s: %s\n",file , strerror(errno));
 		journalsfd = fopen(file, "w+");
 		if (NULL == journalsfd){
-			fprintf(stderr, "error create catelog file %s: %s\n",file , strerror(errno));
+			fprintf(stderr, "error create catalog file %s: %s\n",file , strerror(errno));
 			return;
 		}
 	}
-	struct CatelogEntry entry;
+	struct catalogEntry entry;
 	while (1 == fread(&entry, sizeof(entry), 1, journalsfd)) {
-		if (time  == entry.time && clock == entry.clock) {
+		if (time  == entry.key.time && clock == entry.key.clock) {
 			fseek(journalsfd,-sizeof(entry), SEEK_CUR);
 			entry.done= 1;
 			fwrite(&entry, sizeof(entry), 1, journalsfd);
@@ -269,11 +278,11 @@ static void putEntry(struct Queue *q, time_t time, clock_t ct) {
 	if (NULL == journalsfd){
 		journalsfd = fopen(file, "w+");
 		if (NULL == journalsfd){
-			fprintf(stderr, "error create catelog file %s: %s\n",file , strerror(errno));
+			fprintf(stderr, "error create catalog file %s: %s\n",file , strerror(errno));
 			return;
 		}
 	}
-	struct CatelogEntry entry;
+	struct catalogEntry entry;
 	while (1 == fread(&entry, sizeof(entry), 1, journalsfd)) {
 		if (1 == entry.done) {
 			fseek(journalsfd,-sizeof(entry), SEEK_CUR);
@@ -281,8 +290,8 @@ static void putEntry(struct Queue *q, time_t time, clock_t ct) {
 		}
 	}
 	entry.done= 0;
-	entry.time = time;
-	entry.clock = ct;
+	entry.key.time = time;
+	entry.key.clock = ct;
 	fwrite(&entry, sizeof(entry), 1, journalsfd);
 	fflush(journalsfd);
 	fclose(journalsfd);
@@ -316,7 +325,6 @@ struct Queue * queue_open_with_options(const char * const path,... ) {
 struct Queue * queue_open(const char * const path) {
 	return queue_open_with_options(path,NULL);
 }
-#define UNUSED __attribute__((unused))
 
 void queue_repair_with_options(const char * const path,... ) {
 	va_list argp;
@@ -398,17 +406,17 @@ static int queue_peek_h(struct Queue * const q,  int64_t idx, struct QueueData *
 		}
 	}
 	if (0 == read) {
-		if (q->write.time == q->read.time && q->write.clock == q->read.clock) {
+		if (FILE_KEY_EQUAL(q->write.key, q->read.key)) {
 			return LIBQUEUE_FAILURE;
 		}
 		char file[MAX_FILE_NAME];
 		closeFileItr(&q->read);
-		if (0 != unlink(getBinLogFileName(q->read.time,q->read.clock, q->path, file)) &&
-				0 != unlink(getJournalFileName(q->read.time,q->read.clock, q->path, file)))  {
+		if (0 != unlink(getBinLogFileName(q->read.key.time,q->read.key.clock, q->path, file)) &&
+				0 != unlink(getJournalFileName(q->read.key.time,q->read.key.clock, q->path, file)))  {
 			queue_set_error(q, "failed to delete binlog or journal: ", strerror(errno));
 			return LIBQUEUE_FAILURE;
 		}
-		setCatelogEntryDone(q,q->read.time,q->read.clock);
+		setcatalogEntryDone(q,q->read.key.time,q->read.key.clock);
 		return queue_peek_h(q,idx,d,je);
 	}
 	fseek(q->read.journalfd, -sizeof (struct JournalEntry),  SEEK_CUR );
