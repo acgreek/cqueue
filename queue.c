@@ -61,7 +61,6 @@ struct Queue {
 	char * path;
 
 	FILE * catalogFd;
-	FILE * catalogFd1;
 
 	// push and pop iter
 	struct FileItr read;
@@ -266,6 +265,7 @@ static FILE * openCatalog(struct Queue *q) {
 			return NULL;
 		}
 	}
+	flock(fileno(catalogFd), LOCK_EX);
 	return catalogFd;
 }
 
@@ -305,6 +305,9 @@ struct Queue * queue_open_with_options(const char * const path,... ) {
 	}
 	q->path = strdup(path);
 	q->catalogFd = openCatalog(q);
+	if (q->fail_if_missing) {
+		return q;
+	}
 	setCountLengthByStatingFiles(q);
 	return q;
 }
@@ -333,10 +336,10 @@ int queue_close(struct Queue *q) {
 	IFFN(q->path);
 	closeFileItr(&q->read);
 	closeFileItr(&q->write);
-	if (NULL != q->catalogFd)
+	if (NULL != q->catalogFd) {
+		flock(fileno(q->catalogFd), LOCK_UN);
 		fclose(q->catalogFd);
-	if (NULL != q->catalogFd1)
-		fclose(q->catalogFd1);
+	}
 	IFFN(q->error_strp);
 	memset(q,0, sizeof(struct Queue));
 	IFFN(q);
