@@ -59,6 +59,10 @@ int fileItr_opened(struct FileItr *itrp ) {
 
 struct Queue {
 	char * path;
+
+	FILE * catalogFd;
+
+	// push and pop iter
 	struct FileItr read;
 	struct FileItr write;
 
@@ -197,29 +201,32 @@ static void setCountLengthByStatingFiles(struct Queue *q) {
 	fclose (journalsfd);
 }
 
-static FileKey getOldestJournal(struct Queue *q) {
+static FileKey getNextOldestJournal(struct Queue *q, FileKey *oldkey) {
 	FileKey key = {0,0};
 	char file[MAX_FILE_NAME];
 	snprintf(file, sizeof(file)-1,"%s/catalog", q->path);
-	FILE * journalsfd = fopen(file, "r+");
-	if (NULL == journalsfd)
+	q->catalogFd = fopen(file, "r+");
+	if (NULL == q->catalogFd)
 		return key;
 	struct catalogEntry entry;
 	struct catalogEntry oldest_entry = {{ULONG_MAX,ULONG_MAX}, 0 };
-	while (!feof(journalsfd)) {
-		fread(&entry, sizeof(entry), 1, journalsfd);
-//		if (0 == entry.done && (((unsigned long) entry.key.time) < (unsigned long)oldest_entry.key.time ||
-//				((((unsigned long) entry.key.time) == (unsigned long)oldest_entry.key.time )
-//				 && ((unsigned long) entry.key.clock) < (unsigned long)oldest_entry.key.clock))) {
-		if (0 == entry.done && FILE_KEY_LESS(entry.key,oldest_entry.key)) {
+	fseek(q->catalogFd, 0, SEEK_SET);
+	while (!feof(q->catalogFd)) {
+		fread(&entry, sizeof(entry), 1, q->catalogFd);
+		if (0 == entry.done && FILE_KEY_LESS(entry.key,oldest_entry.key) &&
+				FILE_KEY_GREATER(entry.key, (*oldkey))) {
 			oldest_entry = entry;
 		}
 	}
-	fclose (journalsfd);
+	fclose (q->catalogFd);
 	if (ULONG_MAX != oldest_entry.key.time) {
 		return oldest_entry.key;
 	}
 	return key;
+}
+static FileKey getOldestJournal(struct Queue *q) {
+	FileKey key = {0,0};
+	return getNextOldestJournal(q,&key);
 }
 
 static void newestEntry(struct Queue *q,time_t * timep, clock_t *clockp) {
