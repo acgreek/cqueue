@@ -59,7 +59,6 @@ int fileItr_opened(struct FileItr *itrp ) {
 
 struct Queue {
 	char * path;
-
 	FILE * catalogFd;
 
 	// push and pop iter
@@ -148,6 +147,7 @@ struct catalogEntry {
 	FileKey key;
 	char done;
 };
+
 struct JournalEntry {
 	unsigned long offset;
 	unsigned long size;
