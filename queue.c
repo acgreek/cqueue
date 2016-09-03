@@ -41,7 +41,8 @@ typedef struct _FileKey {
 }FileKey;
 
 #define FILE_KEY_EQUAL(A,B) (A.time == B.time && A.clock == B.clock)
-#define FILE_KEY_GREATER(A,B) (A.time > B.time || (A.time == B.time && A.clock > B.clock))
+#define FILE_KEY_GREATER(A,B) ((unsigned long)A.time > (unsigned long)B.time || (A.time == B.time && (unsigned long)A.clock > (unsigned long)B.clock))
+#define FILE_KEY_LESS(A,B) ((unsigned long)A.time < (unsigned long)B.time || ((unsigned long)A.time == (unsigned long)B.time && (unsigned long)A.clock < (unsigned long)B.clock))
 
 struct FileItr {
 	FileKey key;
@@ -204,14 +205,13 @@ static FileKey getOldestJournal(struct Queue *q) {
 	if (NULL == journalsfd)
 		return key;
 	struct catalogEntry entry;
-	struct catalogEntry oldest_entry;
-	oldest_entry.key.time = ULONG_MAX;
-	oldest_entry.key.clock= ULONG_MAX;
+	struct catalogEntry oldest_entry = {{ULONG_MAX,ULONG_MAX}, 0 };
 	while (!feof(journalsfd)) {
 		fread(&entry, sizeof(entry), 1, journalsfd);
-		if (0 == entry.done && (((unsigned long) entry.key.time) < (unsigned long)oldest_entry.key.time ||
-				((((unsigned long) entry.key.time) == (unsigned long)oldest_entry.key.time )
-				 && ((unsigned long) entry.key.clock) < (unsigned long)oldest_entry.key.clock))) {
+//		if (0 == entry.done && (((unsigned long) entry.key.time) < (unsigned long)oldest_entry.key.time ||
+//				((((unsigned long) entry.key.time) == (unsigned long)oldest_entry.key.time )
+//				 && ((unsigned long) entry.key.clock) < (unsigned long)oldest_entry.key.clock))) {
+		if (0 == entry.done && FILE_KEY_LESS(entry.key,oldest_entry.key)) {
 			oldest_entry = entry;
 		}
 	}
@@ -235,8 +235,7 @@ static void newestEntry(struct Queue *q,time_t * timep, clock_t *clockp) {
 	newest_entry.key.time = 0;
 	while (!feof(journalsfd)) {
 		fread(&entry, sizeof(entry), 1, journalsfd);
-		if (0 == entry.done && ( entry.key.time > newest_entry.key.time ||
-				(entry.key.time == newest_entry.key.time &&  entry.key.clock > newest_entry.key.clock))) {
+		if (0 == entry.done && ( FILE_KEY_GREATER(entry.key,newest_entry.key))) {
 			newest_entry = entry;
 		}
 	}
