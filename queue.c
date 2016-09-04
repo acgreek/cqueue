@@ -192,7 +192,7 @@ static ssize_t doneEntries(const char * file) {
 	return delCount;
 }
 
-static void setCountLengthByStatingFiles(struct Queue *q) {
+static int setCountLengthByStatingFiles(struct Queue *q) {
 	q->count = q->jour_size= q->bin_size= q->catalog_size=0;
 	fseek(q->catalogFd, 0, SEEK_SET);
 	struct catalogEntry entry;
@@ -208,10 +208,17 @@ static void setCountLengthByStatingFiles(struct Queue *q) {
 			q->jour_size+= jour_stat.st_size;
 			q->bin_size+= bin_stat.st_size;
 		}
+		else {
+			// this next line makes the queue not openned. Don't like
+			IFFN(q->path);
+			queue_set_error(q, "journal or binlog file is missing", "");
+			return LIBQUEUE_FAILURE;
+		}
 	}
 	struct stat cat_stat;
 	fstat(fileno(q->catalogFd), &cat_stat);
 	q->catalog_size+= cat_stat.st_size;
+	return LIBQUEUE_SUCCESS;
 }
 
 static FileKey getNextOldestJournal(const struct Queue *q, FileKey *oldkey) {

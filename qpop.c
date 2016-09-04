@@ -46,6 +46,11 @@ int main(int argc, char **argv) {
     puts("Failed to open the queue.");
     return EXIT_FAILURE;
   }
+  if(0 == queue_is_opened(q)) {
+      fprintf(stderr,"Failed to open the queue:%s\n", queue_get_last_error(q));
+      closequeue(q);
+      return EXIT_FAILURE;
+  }
   if(queue_len(q, &l) != LIBQUEUE_SUCCESS) {
     puts("Failed to retrieve the queue length.");
     closequeue(q);
