@@ -70,6 +70,8 @@ void fill15_test(struct Queue *q) {
 		if (len != qd2.vlen || 0 != memcmp(buffer, qd2.v, qd2.vlen)) {
 			printf("pop value not expected at index %d:expect %d actual %s\n", i, i, (char *)qd2.v);
 		}
+        if (qd2.vlen && qd2.v)
+            free(qd2.v);
     }
 	for (i = 0; i < 15; i++) {
         ssize_t count;

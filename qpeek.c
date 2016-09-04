@@ -59,7 +59,7 @@ int main(int argc, char **argv) {
             continue;
         }
         if(queue_peek(q, j-1, &d) != LIBQUEUE_SUCCESS) {
-            printf("Failed to peek at element #%lld\n",(long long) j);
+            printf("Failed to peek at element #%lld: %s\n",(long long) j, queue_get_last_error(q));
         }
         else
             printf("%s\n", (const char*)d.v);

@@ -88,7 +88,7 @@ struct JournalEntry {
 };
 
 int fileItr_opened(struct FileItr *itrp ) {
-	return itrp->journalfd != NULL;
+	return itrp->journalfd != NULL && itrp->binlogfd != NULL;
 }
 
 const char * queue_get_last_error(const struct Queue * const q) {
@@ -145,11 +145,17 @@ static int openJournalAtTime(FileKey * keyp, const char * path, struct FileItr *
 	itr->journalfd = fopen (getJournalFileName(keyp, path, file), "r+");
 	if (NULL == itr->journalfd)
 		itr->journalfd = fopen (file, "w+");
+	if (NULL ==itr->journalfd ) {
+		return -1;
+	}
 	itr->jsize = getFileSize(itr->journalfd);
 	getBinLogFileName(keyp,path, file);
 	itr->binlogfd= fopen (getBinLogFileName(keyp, path, file), "r+");
 	if (NULL == itr->binlogfd)
 		itr->binlogfd= fopen (file, "w+");
+	if (NULL ==itr->binlogfd) {
+		return -1;
+	}
 	itr->bsize = getFileSize(itr->binlogfd);
 	itr->key = *keyp;
 	return 0;
@@ -235,18 +241,32 @@ static int newestEntry(struct Queue *q,FileKey * key) {
 	}
 	return 0;
 }
-static void setcatalogEntryDone(struct Queue *q,FileKey * keyp) {
+static int writeAndFlushData(FILE *file, const void * data, ssize_t size) {
+	if (1 != fwrite(data, size, 1, file) ){
+		return LIBQUEUE_FAILURE;
+	}
+	if (-1 == fflush(file)) {
+		return LIBQUEUE_FAILURE;
+	}
+	return LIBQUEUE_SUCCESS;
+}
+
+
+static int setcatalogEntryDone(struct Queue *q,FileKey * keyp) {
 	fseek(q->catalogFd, 0, SEEK_SET);
 	struct catalogEntry entry;
 	while (1 == fread(&entry, sizeof(entry), 1,q->catalogFd)) {
 		if (FILE_KEY_EQUAL((*keyp),entry.key)) {
 			fseek(q->catalogFd,-sizeof(entry), SEEK_CUR);
 			entry.done= 1;
-			fwrite(&entry, sizeof(entry), 1, q->catalogFd);
-			fflush(q->catalogFd);
+			if (LIBQUEUE_FAILURE == writeAndFlushData(q->catalogFd, &entry, sizeof(entry))) {
+				queue_set_error(q, "failed update catalog: ", strerror(errno));
+				return LIBQUEUE_FAILURE;
+			}
 			break;
 		}
 	}
+	return LIBQUEUE_SUCCESS;
 }
 static FILE * openCatalog(struct Queue *q) {
 	char file[MAX_FILE_NAME];
@@ -263,8 +283,11 @@ static FILE * openCatalog(struct Queue *q) {
 	return catalogFd;
 }
 
-static void putEntry(struct Queue *q, const FileKey const  * keyp) {
-	fseek(q->catalogFd, 0, SEEK_SET);
+static int putEntry(struct Queue *q, const FileKey const  * keyp) {
+	if (-1 == fseek(q->catalogFd, 0, SEEK_SET)) {
+		queue_set_error(q, "failed to seek to start of  catalog", strerror(errno));
+		return LIBQUEUE_FAILURE;
+	}
 	struct catalogEntry entry;
 	int replacing=0;
 	while (1 == fread(&entry, sizeof(entry), 1,q->catalogFd)) {
@@ -276,11 +299,14 @@ static void putEntry(struct Queue *q, const FileKey const  * keyp) {
 	}
 	entry.done= 0;
 	entry.key = *keyp;
-	fwrite(&entry, sizeof(entry), 1,q->catalogFd);
-	fflush(q->catalogFd);
+	if (LIBQUEUE_FAILURE == writeAndFlushData(q->catalogFd, &entry, sizeof(entry))) {
+		queue_set_error(q, "failed to update catalog", strerror(errno));
+		return LIBQUEUE_FAILURE;
+	}
 	if (0 == replacing) {
 		q->catalog_size  +=sizeof(entry);
 	}
+	return LIBQUEUE_SUCCESS;
 }
 
 static void setFileToWriteTo(struct Queue * q) {
@@ -290,7 +316,9 @@ static void setFileToWriteTo(struct Queue * q) {
 		key.clock= clock();
 		putEntry(q, &key);
 	}
-	openJournalAtTime(&key, q->path, &q->write);
+	if (-1 == openJournalAtTime(&key, q->path, &q->write)) {
+		queue_set_error(q, "failed to binlog or journal: ", strerror(errno));
+	}
 }
 
 struct Queue * queue_open_with_options(const char * const path,... ) {
@@ -363,20 +391,32 @@ int queue_push(struct Queue * const q, struct QueueData * const d) {
 		closeFileItr (&q->write);
 		FileKey key= {time(NULL), clock()};
 		putEntry(q, &key);
-		openJournalAtTime(&key, q->path, &q->write);
+		if (-1 == openJournalAtTime(&key, q->path, &q->write)) {
+			queue_set_error(q, "failed to open binlog or journal", strerror(errno));
+			return LIBQUEUE_FAILURE;
+		}
 	}
-
-	fseek(q->write.journalfd, 0, SEEK_END);
-	fseek(q->write.binlogfd, 0, SEEK_END);
+	if (-1 == fseek(q->write.journalfd, 0, SEEK_END) ) {
+		queue_set_error(q, "failed to seek to end of journal", strerror(errno));
+		return LIBQUEUE_FAILURE;
+	}
+	if (-1 == fseek(q->write.binlogfd, 0, SEEK_END)) {
+		queue_set_error(q, "failed to seek to end of binlog", strerror(errno));
+		return LIBQUEUE_FAILURE;
+	}
 	struct JournalEntry entry;
 
 	entry.offset = ftell(q->write.binlogfd);
-	entry.size = d->vlen * fwrite(d->v, d->vlen, 1, q->write.binlogfd);
-	fflush(q->write.binlogfd);
+	entry.size = d->vlen;
 	entry.done = 0;
-	fwrite((char *)&entry, sizeof(entry), 1, q->write.journalfd);
-
-	fflush(q->write.journalfd);
+	if (LIBQUEUE_FAILURE == writeAndFlushData(q->write.binlogfd, d->v, d->vlen)) {
+		queue_set_error(q, "failed to write data to binlog ", strerror(errno));
+		return LIBQUEUE_FAILURE;
+	}
+	if (LIBQUEUE_FAILURE == writeAndFlushData(q->write.journalfd,(char *)&entry, sizeof(entry))) {
+		queue_set_error(q, "failed to write data to binlog ", strerror(errno));
+		return LIBQUEUE_FAILURE;
+	}
 	q->count++;
 	q->write.bsize +=d->vlen;
 	q->write.jsize += sizeof(entry);
@@ -422,7 +462,9 @@ static int queue_peek_h(struct Queue * const q,  int64_t idx, struct QueueData *
 		d->vlen = je->size;
 		d->v = malloc (d->vlen );
 		fseek(q->read.binlogfd, je->offset,  SEEK_SET);
-		fread(d->v,  d->vlen,1, q->read.binlogfd);
+		if (1 != fread(d->v,  d->vlen,1, q->read.binlogfd)) {
+			return LIBQUEUE_FAILURE;
+		}
 	}
 	return LIBQUEUE_SUCCESS;
 }
@@ -433,6 +475,7 @@ static int queue_index_lookup(const struct Queue * const q,  int64_t idx, struct
 	if (0 ==  fileItr_opened(itr) ) {
 		FileKey key =  getOldestJournal(q);
 		if (0 ==key.time) {
+			queue_set_error((struct Queue *)q,"queue is empty","");
 			return LIBQUEUE_FAILURE;
 		}
 		openJournalAtTime(&key, q->path, itr);
@@ -467,7 +510,9 @@ static int queue_index_lookup(const struct Queue * const q,  int64_t idx, struct
 		d->vlen = je->size;
 		d->v = malloc (d->vlen );
 		fseek(itr->binlogfd, je->offset,  SEEK_SET);
-		fread(d->v,  d->vlen,1, itr->binlogfd);
+		if ( 1 !=  fread(d->v,  d->vlen,1, itr->binlogfd)) {
+			return LIBQUEUE_FAILURE;
+		}
 	}
 	return LIBQUEUE_SUCCESS;
 }
@@ -535,6 +580,7 @@ int queue_poke(struct Queue *q, int64_t idx, struct QueueData *d){
 	assert(q != NULL);
 	assert(d != NULL);
 	assert(d->v != NULL);
-	return LIBQUEUE_SUCCESS;
+	queue_set_error(q, "queue_poke not implemented", "");
+	return LIBQUEUE_FAILURE;
 }
 

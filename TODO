@@ -6,6 +6,6 @@ X rotate to next file when max binlog exceeded
 - UNIT TESTS broken scenarios
 - correct spelling of vars
 X keep catelog open 
-- implement peek index
+X implement peek index
 - implement poke
 
