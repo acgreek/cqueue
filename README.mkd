@@ -17,6 +17,21 @@ originally, I port libqueue from another github developer projects to use leveld
 that queue_pop was extremely slow. I actually don't need or want the level's  or key value aspects 
 of level db so I wrote this as simple file based replacement.
 
+Back ground
+============
+I needed a simple durable fast queuing solution for one of my projects. I found a simple durable queue api at https://github.com/2ion/libqueue which was using Tokyo Cabinet for storage of which I didn't like the licensing. I ported it to use leveldb and found the performance for deleting (popping) records was extremely slow:
+[:~/libqueue] master+* ± ./bench
+it took 0 to push 10485760(inf) in 1024(inf) blocks
+it took 36 to pop 10485760(291271) in 1024(28.4444) blocks
+https://github.com/acgreek/libqueue
+so replaced leveldb with a simpl file based back-end
+
+[:~/cqueue] master(+1/-1)* ± ./bench 
+it took 0 to push 104857600(inf) in 1024(inf) blocks
+it took 1 to pop 104857600(1.04858e+08) in 1024(1024) blocks
+https://github.com/acgreek/cqueue
+note: I ran these tests on my hp chromebook running cruton linux
+
 
 
 API Overview
