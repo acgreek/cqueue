@@ -235,11 +235,11 @@ static int newestEntry(struct Queue *q,FileKey * key) {
 	}
 	return 0;
 }
-static void setcatalogEntryDone(struct Queue *q,time_t time, clock_t clock) {
+static void setcatalogEntryDone(struct Queue *q,FileKey * keyp) {
 	fseek(q->catalogFd, 0, SEEK_SET);
 	struct catalogEntry entry;
 	while (1 == fread(&entry, sizeof(entry), 1,q->catalogFd)) {
-		if (time  == entry.key.time && clock == entry.key.clock) {
+		if (FILE_KEY_EQUAL((*keyp),entry.key)) {
 			fseek(q->catalogFd,-sizeof(entry), SEEK_CUR);
 			entry.done= 1;
 			fwrite(&entry, sizeof(entry), 1, q->catalogFd);
@@ -330,6 +330,7 @@ void queue_repair_with_options(const char * const path,... ) {
 void queue_repair(const char * path) {
 	return queue_repair_with_options(path,NULL);
 }
+
 static void closeFileItr(struct FileItr * fip){
 	if (fip->journalfd) fclose(fip->journalfd);
 	fip->journalfd =NULL;
@@ -413,7 +414,7 @@ static int queue_peek_h(struct Queue * const q,  int64_t idx, struct QueueData *
 			queue_set_error(q, "failed to delete binlog or journal: ", strerror(errno));
 			return LIBQUEUE_FAILURE;
 		}
-		setcatalogEntryDone(q,q->read.key.time,q->read.key.clock);
+		setcatalogEntryDone(q,&q->read.key);
 		return queue_peek_h(q,idx,d,je);
 	}
 	fseek(q->read.journalfd, -sizeof (struct JournalEntry),  SEEK_CUR );

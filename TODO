@@ -1,11 +1,11 @@
 - replace calls to time(NULL) with some incrementing number
 -  handle case where number wraps back to zero
-- rotate to next file when max binlog exceeded
+X rotate to next file when max binlog exceeded
 - error handling fread, fwrite, fopen 
 - mkdir director for queue
 - UNIT TESTS broken scenarios
 - correct spelling of vars
-- keep catelog open 
+X keep catelog open 
 - implement peek index
 - implement poke
 
