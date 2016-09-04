@@ -35,6 +35,9 @@
 
 #define MAX_FILE_NAME 1024
 
+#define DEFAULT_MAX_Q_SIZE_IN_BYTES 2lu*1024*1024*1024
+#define DEFAULT_MAX_Q_ENTRIES  ULONG_MAX
+
 #define FILE_KEY_EQUAL(A,B) (A.time == B.time && A.clock == B.clock)
 #define FILE_KEY_GREATER(A,B) ((unsigned long)A.time > (unsigned long)B.time || (A.time == B.time && (unsigned long)A.clock > (unsigned long)B.clock))
 #define FILE_KEY_LESS(A,B) ((unsigned long)A.time < (unsigned long)B.time || ((unsigned long)A.time == (unsigned long)B.time && (unsigned long)A.clock < (unsigned long)B.clock))
@@ -74,6 +77,8 @@ struct Queue {
 	//settings
 	size_t max_bin_log_size; //
 	char   fail_if_missing;
+	ssize_t max_size_in_bytes;
+	ssize_t max_entries;
 };
 
 struct catalogEntry {
@@ -110,9 +115,17 @@ static struct Queue * readoptions (va_list argp) {
 	memset(q, 0, sizeof(struct Queue));
 	const char * p;
 	q->max_bin_log_size= 10 *1024 *1024;
+	q->max_size_in_bytes = DEFAULT_MAX_Q_SIZE_IN_BYTES;
+	q->max_entries = DEFAULT_MAX_Q_ENTRIES;
 	for (p = va_arg(argp, char *); p != NULL; p = va_arg(argp,char *)) {
 		if (0 == strcmp(p, "maxBinLogSize")) {
-			q->max_bin_log_size= va_arg(argp, size_t);
+			q->max_bin_log_size= va_arg(argp, ssize_t);
+		}
+		if (0 == strcmp(p, "maxSizeInBytes")) {
+			q->max_size_in_bytes= va_arg(argp, ssize_t);
+		}
+		if (0 == strcmp(p, "maxEntries")) {
+			q->max_entries= va_arg(argp, ssize_t);
 		}
 		if (0 == strcmp(p, "failIfMissing")) {
 		   q-> fail_if_missing = 1;
@@ -371,6 +384,7 @@ int queue_close(struct Queue *q) {
 	IFFN(q->path);
 	closeFileItr(&q->read);
 	closeFileItr(&q->write);
+	// catalog should be the last file to close to prevent race on the queue
 	if (NULL != q->catalogFd) {
 		flock(fileno(q->catalogFd), LOCK_UN);
 		fclose(q->catalogFd);
@@ -385,6 +399,15 @@ int queue_push(struct Queue * const q, struct QueueData * const d) {
 	assert(q != NULL);
 	assert(d != NULL);
 	assert(d->v != NULL);
+	if (q->count +1 > q->max_entries) {
+		queue_set_error(q, "max entries reached","");
+		return LIBQUEUE_FAILURE;
+	}
+	if ((q->bin_size + q->jour_size + q->catalog_size +d->vlen)  > q->max_size_in_bytes) {
+		queue_set_error(q, "max size in bytes would be exceeded","");
+		return LIBQUEUE_FAILURE;
+	}
+
 	if (!fileItr_opened(&q->write))
 		setFileToWriteTo(q);
 	if (q->write.bsize + d->vlen > q->max_bin_log_size ) {

@@ -47,7 +47,7 @@ int main(int argc, char **argv) {
     d.v = argv[optind+1];
     d.vlen = sizeof(char)*(strlen(argv[optind+1])+1);
     if(queue_poke(q, i-1, &d) != LIBQUEUE_SUCCESS) {
-        puts("Failed to poke.");
+        printf("Failed to poke: %s\n", queue_get_last_error(q));
         closequeue(q);
         return EXIT_FAILURE;
     }

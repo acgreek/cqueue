@@ -77,7 +77,8 @@ struct Queue *  queue_open(const char *path);
 
   available options:
 	maxBinLogSize     byte size of the binlog, smaller binlogs cost performance in that as the queue grows and strinks, the more files will be created and destroyed. Larger binlog will use up more disk space for when the entries are deleted 
-	
+	maxEntries        Max number of entries in the queue. queue_push will return LIBQUEUE_FAILURE if attempt is made to exceed this limit
+	maxSizeInByte     Max number of appropriate disk usage of queue. queue_push will return LIBQUEUE_FAILURE if attempt is made to exceed this limit 
 
  */
 struct Queue *  queue_open_with_options(const char *path,..., NULL);

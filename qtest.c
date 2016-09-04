@@ -1,3 +1,4 @@
+// vim : set noet
 #include <stdlib.h>
 #include <stdio.h>
 #include "queue.h"
@@ -87,6 +88,31 @@ void fill15_test(struct Queue *q) {
 		fprintf(stderr, "ERROR: there should be 0 in the queue but got back %lld\n", (long long unsigned)count);
     }
 }
+void maxEntries (const char * template) {
+	struct Queue *q=queue_open_with_options(template,"maxEntries",4, NULL);
+	struct QueueData qd;
+	int i = 10;
+	qd.v = &i;
+	qd.vlen = sizeof(i);
+	if (LIBQUEUE_SUCCESS != queue_push(q, &qd))
+		puts("queue push did not succeed");
+	if (LIBQUEUE_SUCCESS != queue_push(q, &qd))
+		puts("queue push did not succeed");
+	if (LIBQUEUE_SUCCESS != queue_push(q, &qd))
+		puts("queue push did not succeed");
+	if (LIBQUEUE_SUCCESS != queue_push(q, &qd))
+		puts("queue push did not succeed");
+	if (LIBQUEUE_FAILURE!= queue_push(q, &qd))
+		puts("queue push succeed when it shouldn't have");
+	if (LIBQUEUE_SUCCESS != queue_pop(q, &qd))
+		puts("queue pop did not succeed");
+	if (qd.v) free(qd.v);
+		puts("queue push did not succeed");
+	if (LIBQUEUE_SUCCESS != queue_push(q, &qd))
+		puts("queue push did not succeed");
+	if (LIBQUEUE_FAILURE!= queue_push(q, &qd))
+	queue_close(q);
+}
 
 int main(int argc, char **argv) {
 	struct Queue *q;
@@ -114,6 +140,8 @@ int main(int argc, char **argv) {
     henry_push_test(q);
     int32_push_test(q);
     fill15_test(q);
+	queue_close(q);
+	maxEntries (template);
 
 
 	if(queue_close(q) != 0)
@@ -127,11 +155,12 @@ int main(int argc, char **argv) {
 	if (EXIT_SUCCESS != resultsOfDelete) {
 		puts("there was an error running delete of temp dir command ");
 		return 1;
-    }
+	}
 	q=queue_open_with_options(template,"failIfMissing", NULL);
 	if (NULL == queue_get_last_error(q)) {
 		puts("queue was created when it shouldn't have been");
 	}
-    queue_close(q);
+	queue_close(q);
+
 	return 0;
 }
