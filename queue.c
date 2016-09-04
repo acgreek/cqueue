@@ -161,6 +161,7 @@ static int openJournalAtTime(FileKey * keyp, const char * path, struct FileItr *
 	if (NULL ==itr->journalfd ) {
 		return -1;
 	}
+	setbuf(itr->journalfd, NULL);
 	itr->jsize = getFileSize(itr->journalfd);
 	getBinLogFileName(keyp,path, file);
 	itr->binlogfd= fopen (getBinLogFileName(keyp, path, file), "r+");
@@ -169,6 +170,7 @@ static int openJournalAtTime(FileKey * keyp, const char * path, struct FileItr *
 	if (NULL ==itr->binlogfd) {
 		return -1;
 	}
+	setbuf(itr->binlogfd, NULL);
 	itr->bsize = getFileSize(itr->binlogfd);
 	itr->key = *keyp;
 	return 0;
@@ -299,6 +301,7 @@ static FILE * openCatalog(struct Queue *q) {
 			return NULL;
 		}
 	}
+	setbuf(catalogFd, NULL);
 	flock(fileno(catalogFd), LOCK_EX);
 	return catalogFd;
 }
