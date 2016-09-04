@@ -6,7 +6,7 @@ X rotate to next file when max binlog exceeded
 - correct spelling of vars
 X keep catelog open 
 X implement peek index
-- implement poke
+X implement poke
 X implement max number of entries
 X implement max queue size
 

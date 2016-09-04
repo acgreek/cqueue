@@ -585,7 +585,6 @@ int queue_count(struct Queue * const q, int64_t * const countp) {
 	assert(countp != NULL);
 	*countp=q->count;
 	return LIBQUEUE_SUCCESS;
-
 }
 
 /**
@@ -613,7 +612,34 @@ int queue_poke(struct Queue *q, int64_t idx, struct QueueData *d){
 	assert(q != NULL);
 	assert(d != NULL);
 	assert(d->v != NULL);
-	queue_set_error(q, "queue_poke not implemented", "");
-	return LIBQUEUE_FAILURE;
+	struct FileItr itr;
+	memset(&itr, 0, sizeof(itr));
+	struct JournalEntry  je;
+	int results = queue_index_lookup(q,  idx, &itr,NULL, &je);
+	if (results == LIBQUEUE_FAILURE) {
+		closeFileItr(&itr);
+		return LIBQUEUE_FAILURE;
+	}
+	if (je.size < d->vlen) {
+		queue_set_error(q, "size of existing entry smaller that data needing to be replaced","");
+		closeFileItr(&itr);
+		return LIBQUEUE_FAILURE;
+	}
+	fseek(itr.binlogfd, je.offset,  SEEK_SET);
+	if (LIBQUEUE_FAILURE == writeAndFlushData(itr.binlogfd, d->v, d->vlen)) {
+		queue_set_error(q, "failed to update binlog with poke replacement data", "");
+		closeFileItr(&itr);
+		return LIBQUEUE_FAILURE;
+	}
+	if (je.size != d->vlen) {
+		if (LIBQUEUE_FAILURE == writeAndFlushData(itr.journalfd, &je, sizeof(je))) {
+			queue_set_error(q, "failed to update journal with poke replacement size","");
+			closeFileItr(&itr);
+			return LIBQUEUE_FAILURE;
+		}
+	}
+
+	closeFileItr(&itr);
+	return LIBQUEUE_SUCCESS;
 }
 
