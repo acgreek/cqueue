@@ -51,6 +51,9 @@ target_link_libraries(qrepair queue)
 add_executable(qtest qtest.c queueutils.c) 
 target_link_libraries(qtest queue)
 
+add_executable(qtest1 qtest1.c queueutils.c) 
+target_link_libraries(qtest1 queue)
+
 install(TARGETS queue DESTINATION "lib")
 install(FILES queue.h DESTINATION "include")
 

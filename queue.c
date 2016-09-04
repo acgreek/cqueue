@@ -195,7 +195,7 @@ static void setCountLengthByStatingFiles(struct Queue *q) {
 	q->catalog_size+= cat_stat.st_size;
 }
 
-static FileKey getNextOldestJournal(struct Queue *q, FileKey *oldkey) {
+static FileKey getNextOldestJournal(const struct Queue *q, FileKey *oldkey) {
 	FileKey key = {0,0};
 	struct catalogEntry entry;
 	struct catalogEntry oldest_entry = {{ULONG_MAX,ULONG_MAX}, 0 };
@@ -211,7 +211,7 @@ static FileKey getNextOldestJournal(struct Queue *q, FileKey *oldkey) {
 	}
 	return key;
 }
-static FileKey getOldestJournal(struct Queue *q) {
+static FileKey getOldestJournal(const struct Queue *q) {
 	FileKey key = {0,0};
 	return getNextOldestJournal(q,&key);
 }
@@ -427,12 +427,62 @@ static int queue_peek_h(struct Queue * const q,  int64_t idx, struct QueueData *
 	return LIBQUEUE_SUCCESS;
 }
 
+static int queue_index_lookup(const struct Queue * const q,  int64_t idx, struct FileItr * itr,struct QueueData * const d, struct JournalEntry  *je) {
+	assert(q != NULL);
+	assert(d != NULL);
+	if (0 ==  fileItr_opened(itr) ) {
+		FileKey key =  getOldestJournal(q);
+		if (0 ==key.time) {
+			return LIBQUEUE_FAILURE;
+		}
+		openJournalAtTime(&key, q->path, itr);
+	}
+	if (!fileItr_opened(itr)) {
+		return LIBQUEUE_FAILURE;
+	}
+	int read=0;
+	while (1 == fread(je, sizeof(struct JournalEntry),1,itr->journalfd )) {
+		if (0 == je->done ) {
+			read++;
+			if (0 == idx)
+				break;
+			read--;
+			idx--;
+		}
+	}
+	if (0 == read || idx > 0) {
+		if (FILE_KEY_EQUAL(q->write.key, itr->key)) {
+			return LIBQUEUE_FAILURE;
+		}
+		closeFileItr(itr);
+
+		itr->key = getNextOldestJournal(q, &(itr->key));
+		if (0 == itr->key.time )
+			return LIBQUEUE_FAILURE;
+		openJournalAtTime(&itr->key, q->path, itr);
+		return queue_index_lookup(q,idx,itr, d,je);
+	}
+	fseek(itr->journalfd, -sizeof (struct JournalEntry),  SEEK_CUR );
+	if (d) {
+		d->vlen = je->size;
+		d->v = malloc (d->vlen );
+		fseek(itr->binlogfd, je->offset,  SEEK_SET);
+		fread(d->v,  d->vlen,1, itr->binlogfd);
+	}
+	return LIBQUEUE_SUCCESS;
+}
+
+
 /**
  * NOTE, you can only peek 0, idx not implemented yet
  */
 int queue_peek(struct Queue * const q, int64_t idx, struct QueueData * const d) {
+	struct FileItr itr;
+	memset(&itr, 0, sizeof(itr));
 	struct JournalEntry  je;
-	return queue_peek_h(q, idx, d,&je);
+	int results = queue_index_lookup(q,  idx, &itr,d, &je);
+	closeFileItr(&itr);
+	return results;
 }
 
 int queue_pop(struct Queue * const q, struct QueueData * const d) {

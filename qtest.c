@@ -65,6 +65,13 @@ void fill15_test(struct Queue *q) {
 		fprintf(stderr, "ERROR: there should be 15 in the queue but got back %lld\n", (long long unsigned)count);
     }
 	for (i = 0; i < 15; i++) {
+        queue_peek(q, i,&qd2);
+		int len = sprintf(buffer,"%d",i);
+		if (len != qd2.vlen || 0 != memcmp(buffer, qd2.v, qd2.vlen)) {
+			printf("pop value not expected at index %d:expect %d actual %s\n", i, i, (char *)qd2.v);
+		}
+    }
+	for (i = 0; i < 15; i++) {
         ssize_t count;
         queue_count(q, &count);
         if (15- i != count) {
