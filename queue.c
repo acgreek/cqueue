@@ -551,12 +551,9 @@ int queue_pop(struct Queue * const q, struct QueueData * const d) {
 	if (LIBQUEUE_SUCCESS != queue_peek_h(q,0, d,&je))
 		return LIBQUEUE_FAILURE;
 	je.done = 1;
-	if (1 != fwrite(&je, sizeof(je),1,q->read.journalfd )){
+
+	if (LIBQUEUE_FAILURE == writeAndFlushData(q->read.journalfd, &je,sizeof(je))) {
 		queue_set_error(q, "failed to mark entry done: ", strerror(errno));
-		return LIBQUEUE_FAILURE;
-	}
-	if (0 != fflush(q->read.journalfd)) {
-		queue_set_error(q, "failed to flush mark entry done: ", strerror(errno));
 		return LIBQUEUE_FAILURE;
 	}
 	q->count--;
