@@ -365,23 +365,6 @@ struct Queue * queue_open(const char * const path) {
 	return queue_open_with_options(path,NULL);
 }
 
-/**
- * not implemented yet
- */
-void queue_repair_with_options(const char * const path,... ) {
-	va_list argp;
-	va_start(argp, path);
-	UNUSED struct Queue * q = readoptions(argp);
-	va_end(argp);
-}
-
-/**
- * not implemented yet
- */
-void queue_repair(const char * path) {
-	return queue_repair_with_options(path,NULL);
-}
-
 static void closeFileItr(struct FileItr * fip){
 	if (fip->journalfd) fclose(fip->journalfd);
 	fip->journalfd =NULL;
@@ -641,5 +624,86 @@ int queue_poke(struct Queue *q, int64_t idx, struct QueueData *d){
 
 	closeFileItr(&itr);
 	return LIBQUEUE_SUCCESS;
+}
+
+static void correctAllJournalEntries(struct FileItr* itr) {
+	fseek(itr->journalfd, 0, SEEK_SET);
+	struct JournalEntry entry;
+	struct JournalEntry nentry;
+	ssize_t previous_end = 0;
+	ssize_t file_size= getFileSize(itr->binlogfd);
+	ssize_t next_start = file_size;
+	while (1 == fread(&entry, sizeof(entry), 1,itr->journalfd)) {
+		if (1 == fread(&nentry, sizeof(entry), 1,itr->journalfd)) {
+			next_start = nentry.offset;
+			fseek(itr->journalfd,-sizeof(entry), SEEK_CUR);
+		}
+		else {
+			next_start = file_size ;
+		}
+
+		if (entry.offset < previous_end  || entry.offset +entry.size > next_start) {
+			fseek(itr->journalfd,-sizeof(entry), SEEK_CUR);
+			entry.done= 1;
+			if (LIBQUEUE_FAILURE == writeAndFlushData(itr->journalfd, &entry, sizeof(entry))) {
+				// what do we do
+			}
+		}
+	}
+
+}
+static int fix_catalog_entries(struct Queue *q) {
+	q->count = q->jour_size= q->bin_size= q->catalog_size=0;
+	fseek(q->catalogFd, 0, SEEK_SET);
+	struct catalogEntry entry;
+	while (1 == fread(&entry, sizeof(entry), 1,q->catalogFd)) {
+		if (entry.done != 0)
+			continue;
+		struct stat bin_stat, jour_stat;
+		char file[MAX_FILE_NAME];
+		if (0 == stat(getJournalFileName(&entry.key, q->path, file), &jour_stat) &&
+				0 == stat(getBinLogFileName(&entry.key,  q->path, file), &bin_stat)) {
+			// ok, now we need to go through the entries and check that they are correct
+			if (-1 == openJournalAtTime(&entry.key, q->path, &q->write)) {
+				//hmm ,what do I do now
+			}
+			else {
+				correctAllJournalEntries(&q->write);
+				closeFileItr(&q->write);
+			}
+		}
+		else {
+			unlink(getJournalFileName(&entry.key, q->path, file));
+			unlink(getBinLogFileName(&entry.key, q->path, file));
+			ssize_t offset = fseek(q->catalogFd, 0, SEEK_CUR);
+			setcatalogEntryDone(q,&entry.key);
+			fseek(q->catalogFd, offset, SEEK_SET);
+		}
+	}
+	struct stat cat_stat;
+	fstat(fileno(q->catalogFd), &cat_stat);
+	q->catalog_size+= cat_stat.st_size;
+	return LIBQUEUE_SUCCESS;
+}
+/**
+ * not implemented yet
+ */
+void queue_repair_with_options(const char * const path,... ) {
+	va_list argp;
+	va_start(argp, path);
+	UNUSED struct Queue * q = readoptions(argp);
+	va_end(argp);
+
+	q->path = strdup(path);
+	q->catalogFd = openCatalog(q);
+	fix_catalog_entries(q);
+	queue_close(q);
+}
+
+/**
+ * not implemented yet
+ */
+void queue_repair(const char * path) {
+	return queue_repair_with_options(path,NULL);
 }
 

@@ -9,4 +9,9 @@ X implement peek index
 X implement poke
 X implement max number of entries
 X implement max queue size
+X implement queue_repair
+  X repair missing bin or catalog file
+  X repair journal entries with invalid offset and size
+- thread safe version
+
 
