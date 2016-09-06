@@ -514,7 +514,6 @@ static int queue_index_lookup(const struct Queue * const q,  int64_t idx, struct
 			return LIBQUEUE_FAILURE;
 		}
 		closeFileItr(itr);
-
 		itr->key = getNextOldestJournal(q, &(itr->key));
 		if (0 == itr->key.time )
 			return LIBQUEUE_FAILURE;
@@ -532,7 +531,6 @@ static int queue_index_lookup(const struct Queue * const q,  int64_t idx, struct
 	}
 	return LIBQUEUE_SUCCESS;
 }
-
 
 /**
  * NOTE, you can only peek 0, idx not implemented yet
