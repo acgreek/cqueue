@@ -7,7 +7,7 @@
 #include <time.h>
 
 int main(int argc, char **argv) {
-	size_t bufSize= 100*1024*1024;
+	size_t bufSize= 5* 100*1024*1024;
 	size_t blockSize= 1024;
 	struct Queue *q;
 	char template[] = "/tmp/qtest_XXXXXX";

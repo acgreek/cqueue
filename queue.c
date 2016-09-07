@@ -50,9 +50,7 @@ typedef struct _FileKey {
 
 struct FileItr {
 	FileKey key;
-	FILE *journalfd;
 	FILE *binlogfd;
-	ssize_t jsize;
 	ssize_t bsize;
 };
 
@@ -69,7 +67,6 @@ struct Queue {
 
 	// stats
 	size_t count; // at startup we get the count by reading all the journals, then inc/dec as we push and pop
-	size_t jour_size; //  at startup we get the count by reading all the journal bin log size, then inc/dec as we push and pop
 	size_t bin_size; //  at startup we get the count by reading all the journal bin log size, then inc/dec as we push and pop
 
 	//settings
@@ -80,13 +77,17 @@ struct Queue {
 };
 
 struct JournalEntry {
-	unsigned long offset;
 	unsigned long size;
+	unsigned long csum;
 	char done;
 };
 
+struct Footer{
+	ssize_t offsetToJournalEntry;
+};
+
 int fileItr_opened(struct FileItr *itrp ) {
-	return itrp->journalfd != NULL && itrp->binlogfd != NULL;
+	return itrp->binlogfd != NULL;
 }
 
 const char * queue_get_last_error(const struct Queue * const q) {
@@ -135,27 +136,54 @@ static const char *getBinLogFileName(FileKey *keyp, const char * path, char *fil
 	return getFileName("bin_log",keyp,path, file);
 }
 
-static const char *getJournalFileName(FileKey *keyp,const char * path, char *file) {
-	return getFileName("journal",keyp,path, file);
-}
-
 static ssize_t getFileSize(FILE * fd) {
 	if (NULL == fd) return 0;
 	struct stat stat;
 	fstat(fileno(fd), &stat);
 	return stat.st_size;
 }
+static void chopOffIncompleteWrite(FILE *fd) {
+	fseek(fd, 0, SEEK_SET);
+	struct Footer foot;
+	struct JournalEntry je;
+	ssize_t goodOffset = 0;
+	while (1 == fread(&je, sizeof (je),1, fd)) {
+		if (-1 == fseek (fd, je.size, SEEK_CUR)) {
+			// data did not complete write
+			ftruncate (fileno(fd), goodOffset);
+			return;
+		}
+		if (0 == fread(&foot, sizeof(foot), 1, fd)) {
+			// foot was not written
+			ftruncate (fileno(fd), goodOffset);
+			return;
+		}
+		if (foot.offsetToJournalEntry != goodOffset)  {
+			// foot is corrupt
+			ftruncate (fileno(fd), goodOffset);
+			return;
+		}
+		goodOffset = ftell(fd);
+	}
+}
 
+static void checkLastEntry(FILE *fd, ssize_t filesize) {
+	fseek(fd, - sizeof(struct Footer), SEEK_END);
+	struct Footer foot;
+	fread(&foot, sizeof(foot), 1, fd);
+	if (foot.offsetToJournalEntry > (filesize-sizeof(foot) )) {
+		chopOffIncompleteWrite(fd);
+	}
+	fseek(fd, foot.offsetToJournalEntry , SEEK_SET );
+	struct JournalEntry je;
+	fread(&je, sizeof(je), 1, fd);
+	if (filesize == foot.offsetToJournalEntry+ je.size + sizeof(foot))
+		return // we are good
+	chopOffIncompleteWrite(fd);
+
+}
 static int openJournalAtTime(FileKey * keyp, const char * path, struct FileItr * itr) {
 	char file[MAX_FILE_NAME];
-	itr->journalfd = fopen (getJournalFileName(keyp, path, file), "r+");
-	if (NULL == itr->journalfd)
-		itr->journalfd = fopen (file, "w+");
-	if (NULL ==itr->journalfd ) {
-		return -1;
-	}
-	setbuf(itr->journalfd, NULL);
-	itr->jsize = getFileSize(itr->journalfd);
 	getBinLogFileName(keyp,path, file);
 	itr->binlogfd= fopen (getBinLogFileName(keyp, path, file), "r+");
 	if (NULL == itr->binlogfd)
@@ -166,25 +194,37 @@ static int openJournalAtTime(FileKey * keyp, const char * path, struct FileItr *
 	setbuf(itr->binlogfd, NULL);
 	itr->bsize = getFileSize(itr->binlogfd);
 	itr->key = *keyp;
+	if (0 == itr->bsize )
+		return 0;
+
+	if (itr->bsize <  (sizeof(struct JournalEntry) + sizeof(struct Footer))) {
+		//must not of completed the write of the first entry of the file
+		ftruncate (fileno(itr->binlogfd), 0);
+		return 0;
+	}
+	else {
+		checkLastEntry(itr->binlogfd, itr->bsize);
+	}
+	fseek(itr->binlogfd,0,SEEK_SET);
 	return 0;
 }
 
 /**
  * @return number of entries in the journal that are marked done
  */
-static ssize_t doneEntries(const char * file) {
+static ssize_t countEntries(const char * file) {
 	FILE * cf = fopen(file, "r");
 	if (NULL == cf)
 		return 0;
 	struct JournalEntry je;
-	ssize_t delCount=0;
+	ssize_t count=0;
 	while (1 == fread(&je, sizeof(je),1, cf)) {
 		if (0 == je.done)
-			break;
-		delCount++;
+			count++;
+		fseek(cf, je.size + sizeof(struct Footer), SEEK_CUR);
 	}
 	fclose(cf);
-	return delCount;
+	return count;
 }
 
 static int binlogfilter(const struct dirent *ent) {
@@ -205,8 +245,8 @@ static int binlogsort(const struct dirent ** app, const struct dirent ** bpp) {
 }
 
 static int setCountLengthByStatingFiles(struct Queue *q) {
-	q->count = q->jour_size= q->bin_size= 0;
-	struct stat jour_stat, bin_stat;
+	q->count = q->bin_size= 0;
+	struct stat bin_stat;
 	struct dirent **namelist;
 	char file[MAX_FILE_NAME];
 	int n;
@@ -218,11 +258,8 @@ static int setCountLengthByStatingFiles(struct Queue *q) {
 		while (n--) {
 			FileKey key;
 			getTimeClockFromName(namelist[n]->d_name, &key.time,&key.clock);
-			if (0 == stat(getJournalFileName(&key, q->path, file), &jour_stat) &&
-					0 == stat(getBinLogFileName(&key,  q->path, file), &bin_stat)) {
-				q->count += jour_stat.st_size / sizeof(struct JournalEntry) ;
-				q->count -=doneEntries(getJournalFileName(&key, q->path, file));
-				q->jour_size+= jour_stat.st_size;
+			if (0 == stat(getBinLogFileName(&key,  q->path, file), &bin_stat)) {
+				q->count =countEntries(getBinLogFileName(&key, q->path, file));
 				q->bin_size+= bin_stat.st_size;
 			}
 			free(namelist[n]);
@@ -331,8 +368,6 @@ struct Queue * queue_open(const char * const path) {
 }
 
 static void closeFileItr(struct FileItr * fip){
-	if (fip->journalfd) fclose(fip->journalfd);
-	fip->journalfd =NULL;
 	if (fip->binlogfd) fclose(fip->binlogfd);
 	fip->binlogfd=NULL;
 }
@@ -356,7 +391,7 @@ int queue_push(struct Queue * const q, struct QueueData * const d) {
 		queue_set_error(q, "max entries reached","");
 		return LIBQUEUE_FAILURE;
 	}
-	if ((q->bin_size + q->jour_size + d->vlen)  > q->max_size_in_bytes) {
+	if ((q->bin_size + d->vlen + sizeof(struct JournalEntry) + sizeof(struct Footer))  > q->max_size_in_bytes) {
 		queue_set_error(q, "max size in bytes would be exceeded","");
 		return LIBQUEUE_FAILURE;
 	}
@@ -371,30 +406,31 @@ int queue_push(struct Queue * const q, struct QueueData * const d) {
 			return LIBQUEUE_FAILURE;
 		}
 	}
-	if (-1 == fseek(q->write.journalfd, 0, SEEK_END) ) {
-		queue_set_error(q, "failed to seek to end of journal", strerror(errno));
-		return LIBQUEUE_FAILURE;
-	}
 	if (-1 == fseek(q->write.binlogfd, 0, SEEK_END)) {
 		queue_set_error(q, "failed to seek to end of binlog", strerror(errno));
 		return LIBQUEUE_FAILURE;
 	}
 	struct JournalEntry entry;
 
-	entry.offset = ftell(q->write.binlogfd);
 	entry.size = d->vlen;
 	entry.done = 0;
+	struct Footer foot;
+	foot.offsetToJournalEntry = ftell (q->write.binlogfd);
+	if (LIBQUEUE_FAILURE == writeAndFlushData(q->write.binlogfd,(char *)&entry, sizeof(entry))) {
+		queue_set_error(q, "failed to write data to binlog ", strerror(errno));
+		return LIBQUEUE_FAILURE;
+	}
 	if (LIBQUEUE_FAILURE == writeAndFlushData(q->write.binlogfd, d->v, d->vlen)) {
 		queue_set_error(q, "failed to write data to binlog ", strerror(errno));
 		return LIBQUEUE_FAILURE;
 	}
-	if (LIBQUEUE_FAILURE == writeAndFlushData(q->write.journalfd,(char *)&entry, sizeof(entry))) {
+	if (LIBQUEUE_FAILURE == writeAndFlushData(q->write.binlogfd, &foot, sizeof(foot))) {
 		queue_set_error(q, "failed to write data to binlog ", strerror(errno));
 		return LIBQUEUE_FAILURE;
 	}
 	q->count++;
 	q->write.bsize +=d->vlen;
-	q->write.jsize += sizeof(entry);
+	q->write.bsize += sizeof(entry);
 	return LIBQUEUE_SUCCESS;
 }
 
@@ -412,11 +448,12 @@ static int queue_peek_h(struct Queue * const q,  int64_t idx, struct QueueData *
 		return LIBQUEUE_FAILURE;
 	}
 	int read=0;
-	while (1 == fread(je, sizeof(struct JournalEntry),1,q->read.journalfd )) {
+	while (1 == fread(je, sizeof(struct JournalEntry),1,q->read.binlogfd)) {
 		if (0 == je->done ) {
 			read++;
 			break;
 		}
+		fseek(q->read.binlogfd,je->size + sizeof(struct Footer), SEEK_CUR);
 	}
 	if (0 == read) {
 		if (FILE_KEY_EQUAL(q->write.key, q->read.key)) {
@@ -424,22 +461,21 @@ static int queue_peek_h(struct Queue * const q,  int64_t idx, struct QueueData *
 		}
 		char file[MAX_FILE_NAME];
 		closeFileItr(&q->read);
-		if (0 != unlink(getBinLogFileName(&q->read.key, q->path, file)) &&
-				0 != unlink(getJournalFileName(&q->read.key, q->path, file)))  {
-			queue_set_error(q, "failed to delete binlog or journal: ", strerror(errno));
+		if (0 != unlink(getBinLogFileName(&q->read.key, q->path, file)))   {
+			queue_set_error(q, "failed to delete binlog : ", strerror(errno));
 			return LIBQUEUE_FAILURE;
 		}
 		return queue_peek_h(q,idx,d,je);
 	}
-	fseek(q->read.journalfd, -sizeof (struct JournalEntry),  SEEK_CUR );
+	ssize_t offset = ftell(q->read.binlogfd);
 	if (d) {
 		d->vlen = je->size;
 		d->v = malloc (d->vlen );
-		fseek(q->read.binlogfd, je->offset,  SEEK_SET);
 		if (1 != fread(d->v,  d->vlen,1, q->read.binlogfd)) {
 			return LIBQUEUE_FAILURE;
 		}
 	}
+	fseek(q->read.binlogfd,offset - sizeof(*je), SEEK_SET);
 	return LIBQUEUE_SUCCESS;
 }
 
@@ -458,7 +494,7 @@ static int queue_index_lookup(const struct Queue * const q,  int64_t idx, struct
 		return LIBQUEUE_FAILURE;
 	}
 	int read=0;
-	while (1 == fread(je, sizeof(struct JournalEntry),1,itr->journalfd )) {
+	while (1 == fread(je, sizeof(struct JournalEntry),1,itr->binlogfd)) {
 		if (0 == je->done ) {
 			read++;
 			if (0 == idx)
@@ -466,6 +502,7 @@ static int queue_index_lookup(const struct Queue * const q,  int64_t idx, struct
 			read--;
 			idx--;
 		}
+		fseek(itr->binlogfd,je->size + sizeof(struct Footer), SEEK_CUR);
 	}
 	if (0 == read || idx > 0) {
 		if (FILE_KEY_EQUAL(q->write.key, itr->key)) {
@@ -478,15 +515,15 @@ static int queue_index_lookup(const struct Queue * const q,  int64_t idx, struct
 		openJournalAtTime(&itr->key, q->path, itr);
 		return queue_index_lookup(q,idx,itr, d,je);
 	}
-	fseek(itr->journalfd, -sizeof (struct JournalEntry),  SEEK_CUR );
+	ssize_t offset = ftell(itr->binlogfd);
 	if (d) {
 		d->vlen = je->size;
 		d->v = malloc (d->vlen );
-		fseek(itr->binlogfd, je->offset,  SEEK_SET);
 		if ( 1 !=  fread(d->v,  d->vlen,1, itr->binlogfd)) {
 			return LIBQUEUE_FAILURE;
 		}
 	}
+	fseek(itr->binlogfd,offset - sizeof(*je), SEEK_SET);
 	return LIBQUEUE_SUCCESS;
 }
 
@@ -508,10 +545,12 @@ int queue_pop(struct Queue * const q, struct QueueData * const d) {
 		return LIBQUEUE_FAILURE;
 	je.done = 1;
 
-	if (LIBQUEUE_FAILURE == writeAndFlushData(q->read.journalfd, &je,sizeof(je))) {
+	if (LIBQUEUE_FAILURE == writeAndFlushData(q->read.binlogfd, &je,sizeof(je))) {
 		queue_set_error(q, "failed to mark entry done: ", strerror(errno));
 		return LIBQUEUE_FAILURE;
 	}
+	fseek(q->read.binlogfd,je.size + sizeof(struct Footer), SEEK_CUR);
+
 	q->count--;
 	return LIBQUEUE_SUCCESS;
 }
@@ -537,7 +576,7 @@ int queue_len(struct Queue * const q, int64_t * const lenbuf) {
 	if (0 == q->count )
 		*lenbuf = 0;
 	else
-		*lenbuf =q->jour_size + q->bin_size ;
+		*lenbuf =q->bin_size ;
 	return LIBQUEUE_SUCCESS;
 }
 
@@ -548,6 +587,7 @@ int queue_poke(struct Queue *q, int64_t idx, struct QueueData *d){
 	assert(q != NULL);
 	assert(d != NULL);
 	assert(d->v != NULL);
+	/*
 	struct FileItr itr;
 	memset(&itr, 0, sizeof(itr));
 	struct JournalEntry  je;
@@ -576,6 +616,7 @@ int queue_poke(struct Queue *q, int64_t idx, struct QueueData *d){
 	}
 
 	closeFileItr(&itr);
+	*/
 	return LIBQUEUE_SUCCESS;
 }
 
