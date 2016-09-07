@@ -67,7 +67,6 @@ struct Queue {
 
 	// stats
 	size_t count; // at startup we get the count by reading all the journals, then inc/dec as we push and pop
-	size_t jour_size; //  at startup we get the count by reading all the journal bin log size, then inc/dec as we push and pop
 	size_t bin_size; //  at startup we get the count by reading all the journal bin log size, then inc/dec as we push and pop
 
 	//settings
@@ -78,9 +77,13 @@ struct Queue {
 };
 
 struct JournalEntry {
-	unsigned long offset;
 	unsigned long size;
+	unsigned long csum;
 	char done;
+};
+
+struct Footer{
+	ssize_t offsetToJournalEntry;
 };
 
 int fileItr_opened(struct FileItr *itrp ) {
@@ -163,12 +166,11 @@ static ssize_t countEntries(const char * file) {
 	if (NULL == cf)
 		return 0;
 	struct JournalEntry je;
-
 	ssize_t count=0;
 	while (1 == fread(&je, sizeof(je),1, cf)) {
 		if (0 == je.done)
 			count++;
-		fseek(cf, je.size, SEEK_CUR);
+		fseek(cf, je.size + sizeof(struct Footer), SEEK_CUR);
 	}
 	fclose(cf);
 	return count;
@@ -338,7 +340,7 @@ int queue_push(struct Queue * const q, struct QueueData * const d) {
 		queue_set_error(q, "max entries reached","");
 		return LIBQUEUE_FAILURE;
 	}
-	if ((q->bin_size + d->vlen)  > q->max_size_in_bytes) {
+	if ((q->bin_size + d->vlen + sizeof(struct JournalEntry) + sizeof(struct Footer))  > q->max_size_in_bytes) {
 		queue_set_error(q, "max size in bytes would be exceeded","");
 		return LIBQUEUE_FAILURE;
 	}
@@ -359,14 +361,19 @@ int queue_push(struct Queue * const q, struct QueueData * const d) {
 	}
 	struct JournalEntry entry;
 
-	entry.offset = ftell(q->write.binlogfd);
 	entry.size = d->vlen;
 	entry.done = 0;
+	struct Footer foot;
+	foot.offsetToJournalEntry = ftell (q->write.binlogfd);
 	if (LIBQUEUE_FAILURE == writeAndFlushData(q->write.binlogfd,(char *)&entry, sizeof(entry))) {
 		queue_set_error(q, "failed to write data to binlog ", strerror(errno));
 		return LIBQUEUE_FAILURE;
 	}
 	if (LIBQUEUE_FAILURE == writeAndFlushData(q->write.binlogfd, d->v, d->vlen)) {
+		queue_set_error(q, "failed to write data to binlog ", strerror(errno));
+		return LIBQUEUE_FAILURE;
+	}
+	if (LIBQUEUE_FAILURE == writeAndFlushData(q->write.binlogfd, &foot, sizeof(foot))) {
 		queue_set_error(q, "failed to write data to binlog ", strerror(errno));
 		return LIBQUEUE_FAILURE;
 	}
@@ -395,7 +402,7 @@ static int queue_peek_h(struct Queue * const q,  int64_t idx, struct QueueData *
 			read++;
 			break;
 		}
-		fseek(q->read.binlogfd,je->size, SEEK_CUR);
+		fseek(q->read.binlogfd,je->size + sizeof(struct Footer), SEEK_CUR);
 	}
 	if (0 == read) {
 		if (FILE_KEY_EQUAL(q->write.key, q->read.key)) {
@@ -444,7 +451,7 @@ static int queue_index_lookup(const struct Queue * const q,  int64_t idx, struct
 			read--;
 			idx--;
 		}
-		fseek(itr->binlogfd,je->size, SEEK_CUR);
+		fseek(itr->binlogfd,je->size + sizeof(struct Footer), SEEK_CUR);
 	}
 	if (0 == read || idx > 0) {
 		if (FILE_KEY_EQUAL(q->write.key, itr->key)) {
@@ -491,7 +498,7 @@ int queue_pop(struct Queue * const q, struct QueueData * const d) {
 		queue_set_error(q, "failed to mark entry done: ", strerror(errno));
 		return LIBQUEUE_FAILURE;
 	}
-	fseek(q->read.binlogfd,je.size, SEEK_CUR);
+	fseek(q->read.binlogfd,je.size + sizeof(struct Footer), SEEK_CUR);
 
 	q->count--;
 	return LIBQUEUE_SUCCESS;
@@ -518,7 +525,7 @@ int queue_len(struct Queue * const q, int64_t * const lenbuf) {
 	if (0 == q->count )
 		*lenbuf = 0;
 	else
-		*lenbuf =q->jour_size + q->bin_size ;
+		*lenbuf =q->bin_size ;
 	return LIBQUEUE_SUCCESS;
 }
 
