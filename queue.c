@@ -142,7 +142,46 @@ static ssize_t getFileSize(FILE * fd) {
 	fstat(fileno(fd), &stat);
 	return stat.st_size;
 }
+static void chopOffIncompleteWrite(FILE *fd) {
+	fseek(fd, 0, SEEK_SET);
+	struct Footer foot;
+	struct JournalEntry je;
+	ssize_t goodOffset = 0;
+	while (1 == fread(&je, sizeof (je),1, fd)) {
+		if (-1 == fseek (fd, je.size, SEEK_CUR)) {
+			// data did not complete write
+			ftruncate (fileno(fd), goodOffset);
+			return;
+		}
+		if (0 == fread(&foot, sizeof(foot), 1, fd)) {
+			// foot was not written
+			ftruncate (fileno(fd), goodOffset);
+			return;
+		}
+		if (foot.offsetToJournalEntry != goodOffset)  {
+			// foot is corrupt
+			ftruncate (fileno(fd), goodOffset);
+			return;
+		}
+		goodOffset = ftell(fd);
+	}
+}
 
+static void checkLastEntry(FILE *fd, ssize_t filesize) {
+	fseek(fd, - sizeof(struct Footer), SEEK_END);
+	struct Footer foot;
+	fread(&foot, sizeof(foot), 1, fd);
+	if (foot.offsetToJournalEntry > (filesize-sizeof(foot) )) {
+		chopOffIncompleteWrite(fd);
+	}
+	fseek(fd, foot.offsetToJournalEntry , SEEK_SET );
+	struct JournalEntry je;
+	fread(&je, sizeof(je), 1, fd);
+	if (filesize == foot.offsetToJournalEntry+ je.size + sizeof(foot))
+		return // we are good
+	chopOffIncompleteWrite(fd);
+
+}
 static int openJournalAtTime(FileKey * keyp, const char * path, struct FileItr * itr) {
 	char file[MAX_FILE_NAME];
 	getBinLogFileName(keyp,path, file);
@@ -155,6 +194,18 @@ static int openJournalAtTime(FileKey * keyp, const char * path, struct FileItr *
 	setbuf(itr->binlogfd, NULL);
 	itr->bsize = getFileSize(itr->binlogfd);
 	itr->key = *keyp;
+	if (0 == itr->bsize )
+		return 0;
+
+	if (itr->bsize <  (sizeof(struct JournalEntry) + sizeof(struct Footer))) {
+		//must not of completed the write of the first entry of the file
+		ftruncate (fileno(itr->binlogfd), 0);
+		return 0;
+	}
+	else {
+		checkLastEntry(itr->binlogfd, itr->bsize);
+	}
+	fseek(itr->binlogfd,0,SEEK_SET);
 	return 0;
 }
 
