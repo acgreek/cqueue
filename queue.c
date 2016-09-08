@@ -142,6 +142,28 @@ static ssize_t getFileSize(FILE * fd) {
 	fstat(fileno(fd), &stat);
 	return stat.st_size;
 }
+/*
+static unsigned int chksum(char *d, ssize_t size) {
+	unsigned int sum =0;
+	while (size) {
+		switch (size) {
+			default:
+				sum += *d;
+				d++;size--;
+			case 3:
+				sum += *d;
+				d++;size--;
+			case 2:
+				sum += *d;
+				d++;size--;
+			case 0:
+				sum += *d;
+				d++;size--;
+		}
+	}
+	return sum;
+}
+*/
 static void chopOffIncompleteWrite(FILE *fd) {
 	fseek(fd, 0, SEEK_SET);
 	struct Footer foot;
@@ -416,15 +438,13 @@ int queue_push(struct Queue * const q, struct QueueData * const d) {
 	entry.done = 0;
 	struct Footer foot;
 	foot.offsetToJournalEntry = ftell (q->write.binlogfd);
-	if (LIBQUEUE_FAILURE == writeAndFlushData(q->write.binlogfd,(char *)&entry, sizeof(entry))) {
+	if (1 != fwrite((char *)&entry, sizeof(entry),1, q->write.binlogfd)  ||
+			1 != fwrite(d->v, d->vlen,1, q->write.binlogfd)  ||
+			1 != fwrite(&foot,sizeof(foot),1, q->write.binlogfd)  ) {
 		queue_set_error(q, "failed to write data to binlog ", strerror(errno));
 		return LIBQUEUE_FAILURE;
 	}
-	if (LIBQUEUE_FAILURE == writeAndFlushData(q->write.binlogfd, d->v, d->vlen)) {
-		queue_set_error(q, "failed to write data to binlog ", strerror(errno));
-		return LIBQUEUE_FAILURE;
-	}
-	if (LIBQUEUE_FAILURE == writeAndFlushData(q->write.binlogfd, &foot, sizeof(foot))) {
+	if ( 0 !=  fflush(q->write.binlogfd)) {
 		queue_set_error(q, "failed to write data to binlog ", strerror(errno));
 		return LIBQUEUE_FAILURE;
 	}
