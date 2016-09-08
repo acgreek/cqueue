@@ -142,7 +142,7 @@ static ssize_t getFileSize(FILE * fd) {
 	fstat(fileno(fd), &stat);
 	return stat.st_size;
 }
-/*
+
 static unsigned int chksum(char *d, ssize_t size) {
 	unsigned int sum =0;
 	while (size) {
@@ -163,7 +163,7 @@ static unsigned int chksum(char *d, ssize_t size) {
 	}
 	return sum;
 }
-*/
+
 static void chopOffIncompleteWrite(FILE *fd) {
 	fseek(fd, 0, SEEK_SET);
 	struct Footer foot;
@@ -213,7 +213,7 @@ static int openJournalAtTime(FileKey * keyp, const char * path, struct FileItr *
 	if (NULL ==itr->binlogfd) {
 		return -1;
 	}
-	setbuf(itr->binlogfd, NULL);
+	//setbuf(itr->binlogfd, NULL);
 	itr->bsize = getFileSize(itr->binlogfd);
 	itr->key = *keyp;
 	if (0 == itr->bsize )
@@ -390,7 +390,8 @@ struct Queue * queue_open(const char * const path) {
 }
 
 static void closeFileItr(struct FileItr * fip){
-	if (fip->binlogfd) fclose(fip->binlogfd);
+	if (fip->binlogfd)
+		fclose(fip->binlogfd);
 	fip->binlogfd=NULL;
 }
 
@@ -435,6 +436,7 @@ int queue_push(struct Queue * const q, struct QueueData * const d) {
 	struct JournalEntry entry;
 
 	entry.size = d->vlen;
+	entry.csum= chksum(d->v, d->vlen);
 	entry.done = 0;
 	struct Footer foot;
 	foot.offsetToJournalEntry = ftell (q->write.binlogfd);
@@ -492,6 +494,8 @@ static int queue_peek_h(struct Queue * const q,  int64_t idx, struct QueueData *
 		d->vlen = je->size;
 		d->v = malloc (d->vlen );
 		if (1 != fread(d->v,  d->vlen,1, q->read.binlogfd)) {
+			// record has not been fully written yet;
+			fseek(q->read.binlogfd,offset - sizeof(*je), SEEK_SET);
 			return LIBQUEUE_FAILURE;
 		}
 	}

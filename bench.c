@@ -7,7 +7,7 @@
 #include <time.h>
 
 int main(int argc, char **argv) {
-	size_t bufSize= 5* 100*1024*1024;
+	size_t bufSize= 5*100*1024*1024;
 	size_t blockSize= 1024;
 	struct Queue *q;
 	char template[] = "/tmp/qtest_XXXXXX";
@@ -22,6 +22,8 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 	char *buf = malloc (bufSize);
+    memset(buf,'f',bufSize);
+
 	time_t start = time(NULL);
 	intptr_t offset=0;
 	for(; offset < bufSize; offset +=blockSize) {
@@ -39,11 +41,14 @@ int main(int argc, char **argv) {
 	for(; offset < bufSize; offset +=blockSize) {
 		struct QueueData qd;
 		queue_pop(q, &qd);
+        if (qd.v)
+            free(qd.v);
 	}
 	end= time(NULL);
 
 	difft = end-start;
 	printf("it took %lu to pop %lu(%g) in %lu(%g) blocks\n", (unsigned long) difft,bufSize,bufSize/ (double) difft,  blockSize, blockSize/(double)difft);
     queue_close(q);
+    free(buf);
 	return 0;
 }
