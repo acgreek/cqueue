@@ -63,7 +63,7 @@ SET_TARGET_PROPERTIES(qtest1 PROPERTIES
       COMPILE_FLAGS "-ggdb ${EXTREMECUNIT_CFLAGS2}"
 )
 
-target_link_libraries(qtest1 queue ${EXTREMECUNIT_LDFLAGS})
+target_link_libraries(qtest1 ${EXTREMECUNIT_LDFLAGS})
 
 
 install(TARGETS queue DESTINATION "lib")

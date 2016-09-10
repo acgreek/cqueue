@@ -5,8 +5,9 @@
 #include <libgen.h>
 #include <string.h>
 #include <ExtremeCUnit.h>
+#include "queue.c"
 
-void fill15_test(struct Queue *q) {
+static void fillQueues(struct Queue *q) {
 	struct QueueData qd2;
 	char buffer[1024];
 	int i;
@@ -15,12 +16,11 @@ void fill15_test(struct Queue *q) {
 		qd2.vlen= sprintf(buffer,"%d",i);
 		queue_push(q, &qd2);
 	}
-	int64_t count;
-	if (0 != queue_count(q, &count)) {
-	}
-	if (15 != count) {
-		fprintf(stderr, "ERROR: there should be 15 in the queue but got back %lld\n", (long long unsigned)count);
-	}
+}
+static void pop15(struct Queue *q) {
+	struct QueueData qd2;
+	char buffer[1024];
+	int i;
 	for (i = 0; i < 15; i++) {
 		queue_pop(q, &qd2);
 		int len = sprintf(buffer,"%d",i);
@@ -30,6 +30,22 @@ void fill15_test(struct Queue *q) {
 		if (qd2.v)
 			free(qd2.v);
 	}
+}
+
+void fill15_test(struct Queue *q) {
+	struct QueueData qd2;
+	char buffer[1024];
+
+	fillQueues(q);
+
+	int64_t count;
+	if (0 != queue_count(q, &count)) {
+	}
+	if (15 != count) {
+		fprintf(stderr, "ERROR: there should be 15 in the queue but got back %lld\n", (long long unsigned)count);
+	}
+	int i;
+	pop15(q);
 	for (i = 0; i < 15; i++) {
 		qd2.v = buffer;
 		qd2.vlen= sprintf(buffer,"%d",i);
@@ -61,6 +77,18 @@ void fill15_test(struct Queue *q) {
 		fprintf(stderr, "ERROR: there should be 0 in the queue but got back %lld\n", (long long unsigned)count);
 	}
 }
+TEST(TwoByteFiles) {
+	struct Queue *q;
+	char template[] = "/tmp/qtest_XXXXXX";
+	if (NULL == mkdtemp(template)) {
+		puts("failed to create temp dir for running tests");
+		return 1;
+	}
+	q = queue_open_with_options(template, "maxBinLogSize", 1,NULL);
+	fill15_test(q);
+	Assert(0 ==queue_close(q));
+	return 0;
+}
 
 TEST(OneByteFiles) {
 	struct Queue *q;
@@ -73,6 +101,54 @@ TEST(OneByteFiles) {
 	fill15_test(q);
 	if(queue_close(q) != 0)
 		puts("there was an error closing the queue!");
-	puts("queue successfully closed!");
+	return 0;
+}
+TEST(Coruption1) {
+	struct Queue *q;
+	char template[] = "/tmp/qtest_XXXXXX";
+	if (NULL == mkdtemp(template)) {
+		puts("failed to create temp dir for running tests");
+		return 1;
+	}
+	q = queue_open_with_options(template, "maxBinLogSize", 2,NULL);
+	fillQueues(q);
+
+	fwrite(template, 1,1 ,q->write.binlogfd);
+	Assert(queue_close(q) == 0);
+	q = queue_open_with_options(template, "maxBinLogSize", 2,NULL);
+	pop15(q) ;
+
+	struct QueueData qd2;
+	Assert(LIBQUEUE_FAILURE == queue_pop(q, &qd2));
+	fillQueues(q);
+	pop15(q) ;
+
+	Assert(queue_close(q) == 0);
+	return 0;
+}
+TEST(Coruption1to2000) {
+	struct Queue *q;
+	char template[] = "/tmp/qtest_XXXXXX";
+	if (NULL == mkdtemp(template)) {
+		puts("failed to create temp dir for running tests");
+		return 1;
+	}
+	int i=1;
+	for (; i < 2000; i++) {
+		q = queue_open_with_options(template, "maxBinLogSize", 2,NULL);
+		fillQueues(q);
+
+		fwrite(template, i,1 ,q->write.binlogfd);
+		Assert(queue_close(q) == 0);
+		q = queue_open_with_options(template, "maxBinLogSize", 2,NULL);
+		pop15(q) ;
+
+		struct QueueData qd2;
+		Assert(LIBQUEUE_FAILURE == queue_pop(q, &qd2));
+		fillQueues(q);
+		pop15(q) ;
+
+		Assert(queue_close(q) == 0);
+	}
 	return 0;
 }
