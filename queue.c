@@ -156,7 +156,7 @@ static unsigned int chksum(char *d, ssize_t size) {
 			case 2:
 				sum += *d;
 				d++;size--;
-			case 0:
+			case 1:
 				sum += *d;
 				d++;size--;
 		}
@@ -444,10 +444,12 @@ int queue_push(struct Queue * const q, struct QueueData * const d) {
 			1 != fwrite(d->v, d->vlen,1, q->write.binlogfd)  ||
 			1 != fwrite(&foot,sizeof(foot),1, q->write.binlogfd)  ) {
 		queue_set_error(q, "failed to write data to binlog ", strerror(errno));
+		fseek(q->read.binlogfd,foot.offsetToJournalEntry , SEEK_SET);
 		return LIBQUEUE_FAILURE;
 	}
 	if ( 0 !=  fflush(q->write.binlogfd)) {
 		queue_set_error(q, "failed to write data to binlog ", strerror(errno));
+		fseek(q->read.binlogfd,foot.offsetToJournalEntry , SEEK_SET);
 		return LIBQUEUE_FAILURE;
 	}
 	q->count++;

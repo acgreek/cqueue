@@ -1,6 +1,13 @@
 cmake_minimum_required (VERSION 2.6)
 project (cqueue)
 
+find_package(PkgConfig)
+pkg_check_modules (EXTREMECUNIT ExtremeCUnit)
+
+string(REPLACE ";" " " EXTREMECUNIT_LDFLAGS2 "${EXTREMECUNIT_LDFLAGS}" )
+string(REPLACE ";" " " EXTREMECUNIT_CFLAGS2 "${EXTREMECUNIT_CFLAGS}" )
+message(STATUS "CFLAGS=" ${EXTREMECUNIT_CFLAGS2})
+
 set(CMAKE_COMPILE_COMMON_FLAGS "-O0 -D_GNU_SOURCE -std=c99 -Wall -ggdb3 ")
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${CMAKE_COMPILE_COMMON_FLAGS} -ggdb3")
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${CMAKE_COMPILE_COMMON_FLAGS}")
@@ -52,7 +59,12 @@ add_executable(qtest qtest.c queueutils.c)
 target_link_libraries(qtest queue)
 
 add_executable(qtest1 qtest1.c queueutils.c) 
-target_link_libraries(qtest1 queue)
+SET_TARGET_PROPERTIES(qtest1 PROPERTIES
+      COMPILE_FLAGS "-ggdb ${EXTREMECUNIT_CFLAGS2}"
+)
+
+target_link_libraries(qtest1 queue ${EXTREMECUNIT_LDFLAGS})
+
 
 install(TARGETS queue DESTINATION "lib")
 install(FILES queue.h DESTINATION "include")

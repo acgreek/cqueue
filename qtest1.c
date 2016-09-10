@@ -4,6 +4,7 @@
 #include "queue.h"
 #include <libgen.h>
 #include <string.h>
+#include <ExtremeCUnit.h>
 
 void fill15_test(struct Queue *q) {
 	struct QueueData qd2;
@@ -61,7 +62,7 @@ void fill15_test(struct Queue *q) {
 	}
 }
 
-int main(int argc, char **argv) {
+TEST(OneByteFiles) {
 	struct Queue *q;
 	char template[] = "/tmp/qtest_XXXXXX";
 	if (NULL == mkdtemp(template)) {
