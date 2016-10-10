@@ -56,7 +56,7 @@ add_executable(qrepair qrepair.c queueutils.c)
 target_link_libraries(qrepair queue)
 
 add_executable(qtest qtest.c queueutils.c) 
-target_link_libraries(qtest queue)
+target_link_libraries(qtest queue pthread)
 
 add_executable(qtest1 qtest1.c queueutils.c) 
 SET_TARGET_PROPERTIES(qtest1 PROPERTIES

@@ -331,6 +331,8 @@ static int newestEntry(struct Queue *q,FileKey * key) {
 	int found =0;
 	struct dirent **namelist;
 	int n;
+	if (NULL == q->path)
+		return 0;
 	n = scandir(q->path, &namelist, binlogfilter, binlogsort);
 	if (n < 0) {
 		queue_set_error((struct Queue *)q, "failed to scan dir", strerror(errno));
@@ -421,6 +423,10 @@ int queue_push(struct Queue * const q, struct QueueData * const d) {
 
 	if (!fileItr_opened(&q->write))
 		setFileToWriteTo(q);
+	if (!fileItr_opened(&q->write)) {
+		queue_set_error(q, "failed to open bin log", strerror(errno));
+		return LIBQUEUE_FAILURE;
+	}
 	if (q->write.bsize + d->vlen > q->max_bin_log_size ) {
 		closeFileItr (&q->write);
 		FileKey key= {time(NULL), clock()};

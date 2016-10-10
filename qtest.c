@@ -4,6 +4,7 @@
 #include "queue.h"
 #include <libgen.h>
 #include <string.h>
+#include <pthread.h>
 
 void henry_push_test(struct Queue *q) {
 	struct QueueData qd = { "HENRY" , sizeof("HENRY") };
@@ -31,7 +32,7 @@ void  int32_push_test(struct Queue *q) {
 	if (qd2.v)
 		free(qd2.v);
 }
-void fill15_test(struct Queue *q) {
+void push_count(struct Queue *q, int count) {
 	struct QueueData qd2;
 	int i;
 	char buffer[1024];
@@ -40,6 +41,12 @@ void fill15_test(struct Queue *q) {
 		qd2.vlen= sprintf(buffer,"%d",i);
 		queue_push(q, &qd2);
 	}
+}
+void fill15_test(struct Queue *q) {
+	struct QueueData qd2;
+	int i;
+	char buffer[1024];
+	push_count(q, 15) ;
     int64_t count;
     if (0 != queue_count(q, &count)) {
     }
@@ -113,6 +120,28 @@ void maxEntries (const char * template) {
 	if (LIBQUEUE_FAILURE!= queue_push(q, &qd))
 	queue_close(q);
 }
+void *writerThread(void* templatep) {
+	const char * template = (const char *)templatep;
+	struct Queue *q;
+    q = queue_open(template);
+	push_count(q, 100) ;
+	pthread_yield();
+	push_count(q, 100) ;
+    queue_close(q);
+	return NULL;
+}
+void threadTest(const char *template) {
+	pthread_t child;
+	pthread_create(&child,NULL, writerThread,(void *) template);
+	struct Queue *q;
+    q = queue_open(template);
+
+	void *rtn;
+    queue_close(q);
+	pthread_join(child,&rtn);
+
+
+}
 
 int main(int argc, char **argv) {
 	struct Queue *q;
@@ -162,5 +191,6 @@ int main(int argc, char **argv) {
 	}
 	queue_close(q);
 
+	threadTest(template);
 	return 0;
 }
