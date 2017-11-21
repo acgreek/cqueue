@@ -35,9 +35,7 @@ static void pop15(struct Queue *q) {
 void fill15_test(struct Queue *q) {
 	struct QueueData qd2;
 	char buffer[1024];
-
 	fillQueues(q);
-
 	int64_t count;
 	if (0 != queue_count(q, &count)) {
 	}
@@ -147,7 +145,6 @@ TEST(Coruption1to2000) {
 		Assert(LIBQUEUE_FAILURE == queue_pop(q, &qd2));
 		fillQueues(q);
 		pop15(q) ;
-
 		Assert(queue_close(q) == 0);
 	}
 	return 0;
