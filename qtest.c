@@ -6,6 +6,13 @@
 #include <string.h>
 #include <pthread.h>
 
+#define LOG_ERROR(cmd) logError(#cmd, __FILE__, __LINE__, cmd)
+static void logError(const char * cmd, const char * file, int line,  int rtn) {
+    if (LIBQUEUE_SUCCESS != rtn) {
+        fprintf(stdout, "ERROR %s:%d : %s\n", file, line, cmd);
+    }
+}
+
 void hdl_error(int rtn) {
 	if (0 > rtn) {
 		exit(EXIT_FAILURE);
@@ -32,8 +39,8 @@ void  int32_push_test(struct Queue *q) {
 	int32_t ft = 42;
 	qd.v = &ft;
 	qd.vlen = sizeof(int32_t);
-	queue_push(q, &qd);
-	queue_pop(q, &qd2);
+	LOG_ERROR(queue_push(q, &qd));
+	LOG_ERROR(queue_pop(q, &qd2));
 	printf("popping forty-two: %d\n", *(int32_t*)qd2.v);
 	if (qd2.v)
 		free(qd2.v);
@@ -45,7 +52,7 @@ void push_count(struct Queue *q, int count) {
 	for (i = 0; i < 15; i++) {
 		qd2.v = buffer;
 		qd2.vlen= sprintf(buffer,"%d",i);
-		queue_push(q, &qd2);
+		LOG_ERROR(queue_push(q, &qd2));
 	}
 }
 void fill15_test(struct Queue *q) {
@@ -60,7 +67,7 @@ void fill15_test(struct Queue *q) {
 		fprintf(stderr, "ERROR: there should be 15 in the queue but got back %lld\n", (long long unsigned)count);
 	}
 	for (i = 0; i < 15; i++) {
-		queue_pop(q, &qd2);
+		LOG_ERROR(queue_pop(q, &qd2));
 		int len = sprintf(buffer,"%d",i);
 		if (len != qd2.vlen || 0 != memcmp(buffer, qd2.v, qd2.vlen)) {
 			printf("pop value not expected at index %d: %s\n", i, (char *)qd2.v);
@@ -71,7 +78,7 @@ void fill15_test(struct Queue *q) {
 	for (i = 0; i < 15; i++) {
 		qd2.v = buffer;
 		qd2.vlen= sprintf(buffer,"%d",i);
-		queue_push(q, &qd2);
+		LOG_ERROR(queue_push(q, &qd2));
 	}
 	if (0 != queue_count(q, &count)) {
 	}
@@ -79,7 +86,7 @@ void fill15_test(struct Queue *q) {
 		fprintf(stderr, "ERROR: there should be 15 in the queue but got back %lld\n", (long long unsigned)count);
 	}
 	for (i = 0; i < 15; i++) {
-		queue_peek(q, i,&qd2);
+		LOG_ERROR(queue_peek(q, i,&qd2));
 		int len = sprintf(buffer,"%d",i);
 		if (len != qd2.vlen || 0 != memcmp(buffer, qd2.v, qd2.vlen)) {
 			printf("pop value not expected at index %d:expect %d actual %s\n", i, i, (char *)qd2.v);
@@ -89,11 +96,11 @@ void fill15_test(struct Queue *q) {
 	}
 	for (i = 0; i < 15; i++) {
 		ssize_t count;
-		queue_count(q, &count);
+		LOG_ERROR(queue_count(q, &count));
 		if (15- i != count) {
 			fprintf(stderr, "ERROR: while popping off queue, expected %d but got %d\n", (int) 15-i,(int)count );
 		}
-		queue_pop(q, NULL);
+		LOG_ERROR(queue_pop(q, NULL));
 	}
 	if (0 != queue_count(q, &count)) {
 	}
@@ -119,12 +126,13 @@ void maxEntries (const char * template) {
 		fprintf(stdout,"%d queue push succeed when it shouldn't have", __LINE__);
 	if (LIBQUEUE_SUCCESS != queue_pop(q, &qd))
 		fprintf(stdout,"%d queue pop did not succeed", __LINE__);
-	if (qd.v)
-		free(qd.v);
 	if (LIBQUEUE_SUCCESS != queue_push(q, &qd))
 		fprintf(stdout,"%d queue push did not succeed", __LINE__);
-	if (LIBQUEUE_FAILURE!= queue_push(q, &qd))
-		queue_close(q);
+	if (qd.v)
+		free(qd.v);
+	if (LIBQUEUE_FAILURE!= queue_push(q, &qd)) {
+		LOG_ERROR(queue_close(q));
+	}
 }
 void *writerThread(void* templatep) {
 	const char * template = (const char *)templatep;
@@ -132,8 +140,8 @@ void *writerThread(void* templatep) {
 	q = queue_open(template);
 	push_count(q, 100) ;
 	pthread_yield();
-	push_count(q, 100) ;
-	queue_close(q);
+	push_count(q, 100);
+	LOG_ERROR(queue_close(q));
 	return NULL;
 }
 void threadTest(const char *template) {
@@ -142,7 +150,7 @@ void threadTest(const char *template) {
 	struct Queue *q;
 	q = queue_open(template);
 	void *rtn;
-	queue_close(q);
+	LOG_ERROR(queue_close(q));
 	pthread_join(child,&rtn);
 
 }
@@ -159,22 +167,21 @@ int main(int argc, char **argv) {
 	q = queue_open(template);
 	if(0 == queue_is_opened(q)) {
 		fprintf(stderr,"Failed to open the queue:%s", queue_get_last_error(q));
-		queue_close(q);
+		LOG_ERROR(queue_close(q));
 		return EXIT_FAILURE;
 	}
-	queue_close(q);
+	LOG_ERROR(queue_close(q));
 	int i;
 	for (i=1; i < 20; i++  ) {
 		q = queue_open_with_options(template, "maxBinLogSize", i,NULL);
 		fill15_test(q);
-		queue_close(q);
+		LOG_ERROR(queue_close(q));
 	}
 	q = queue_open(template);
 
 	henry_push_test(q);
 	int32_push_test(q);
 	fill15_test(q);
-	queue_close(q);
 	maxEntries (template);
 
 
@@ -194,8 +201,14 @@ int main(int argc, char **argv) {
 	if (NULL == queue_get_last_error(q)) {
 		puts("queue was created when it shouldn't have been");
 	}
-	queue_close(q);
+	LOG_ERROR(queue_close(q));
 
+	if (0 != mkdir(template, 0777)) {
+		printf("failed to create temp dir (%s) for running tests\n", template);
+		return 1;
+	}
 	threadTest(template);
+
+	printf("done\n");
 	return 0;
 }

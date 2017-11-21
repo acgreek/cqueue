@@ -36,6 +36,5 @@ int main(int argc, char **argv) {
         puts("Usage: qlen [-h] [-q queue-name] [--]");
         return EXIT_FAILURE;
     }
-  queue_repair(SELECTQUEUE(cq));
-  return EXIT_SUCCESS;
+  return LIBQUEUE_FAILURE == queue_repair(SELECTQUEUE(cq)) ? EXIT_FAILURE : EXIT_SUCCESS;
 }

@@ -21,6 +21,7 @@
 #ifndef QUEUE_H
 #define QUEUE_H
 
+
 #include <assert.h>
 #include <string.h>
 #include <stdlib.h>
@@ -31,6 +32,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#define WARN_UNUSED_RETURN __attribute__ ((warn_unused_result))
 
 #ifdef __cplusplus
 extern "C"
@@ -52,21 +54,21 @@ struct QueueData {
   void *v;
   u_int64_t vlen ;
 };
-struct Queue * queue_open_with_options(const char *path,...);
-struct Queue * queue_open(const char * path);
-void  queue_repair_with_options(const char * path,...);
-void  queue_repair(const char * path);
-int queue_is_opened (const struct Queue * const q);
-int queue_push(struct Queue *q, struct QueueData *d);
-int queue_pop(struct Queue *q, struct QueueData *d);
-int queue_len(struct Queue *q, int64_t *len);
-int queue_count(struct Queue *q, int64_t *count);
-int queue_compact(struct Queue *q);
-int queue_peek(struct Queue *q, int64_t s, struct QueueData *d);
-int queue_poke(struct Queue *q, int64_t s, struct QueueData *d);
-int queue_close(struct Queue *q);
-int queue_opened(struct Queue *q);
-const char * queue_get_last_error(const struct Queue * const q);
+struct Queue * queue_open_with_options(const char *path,...) WARN_UNUSED_RETURN;
+struct Queue * queue_open(const char * path) WARN_UNUSED_RETURN;
+int queue_repair_with_options(const char * path,...) WARN_UNUSED_RETURN;
+int queue_repair(const char * path) WARN_UNUSED_RETURN;
+int queue_is_opened (const struct Queue * const q) WARN_UNUSED_RETURN;
+int queue_push(struct Queue *q, struct QueueData *d) WARN_UNUSED_RETURN;
+int queue_pop(struct Queue *q, struct QueueData *d) WARN_UNUSED_RETURN;
+int queue_len(struct Queue *q, int64_t *len) WARN_UNUSED_RETURN;
+int queue_count(struct Queue *q, int64_t *count) WARN_UNUSED_RETURN;
+int queue_compact(struct Queue *q) WARN_UNUSED_RETURN;
+int queue_peek(struct Queue *q, int64_t s, struct QueueData *d) WARN_UNUSED_RETURN;
+int queue_poke(struct Queue *q, int64_t s, struct QueueData *d) WARN_UNUSED_RETURN;
+int queue_close(struct Queue *q) WARN_UNUSED_RETURN;
+int queue_opened(struct Queue *q) WARN_UNUSED_RETURN;
+const char * queue_get_last_error(const struct Queue * const q) WARN_UNUSED_RETURN;
 #ifdef __cplusplus
 }
 #endif

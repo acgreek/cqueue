@@ -1,17 +1,11 @@
 cmake_minimum_required (VERSION 3.2)
 project (cqueue)
 
-find_package(PkgConfig)
-pkg_check_modules (EXTREMECUNIT ExtremeCUnit)
-
-string(REPLACE ";" " " EXTREMECUNIT_LDFLAGS2 "${EXTREMECUNIT_LDFLAGS}" )
-string(REPLACE ";" " " EXTREMECUNIT_CFLAGS2 "${EXTREMECUNIT_CFLAGS}" )
-message(STATUS "CFLAGS=" ${EXTREMECUNIT_CFLAGS2})
-
 set(CMAKE_COMPILE_COMMON_FLAGS "")
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${CMAKE_COMPILE_COMMON_FLAGS}")
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${CMAKE_COMPILE_COMMON_FLAGS}")
 set(CMAKE_C_FLAGS "${CMAKE_CXX_FLAGS_RELEASE} ${CMAKE_COMPILE_COMMON_FLAGS}")
+set(CMAKE_LINK_FLAGS "${CMAKE_COMPILE_COMMON_FLAGS}")
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 
@@ -19,6 +13,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 add_library(queue SHARED queue.c)
 add_library(queueStatic STATIC queue.c)
 set_target_properties(queueStatic PROPERTIES OUTPUT_NAME queue)
+
 
 #target_compile_options(queue PRIVATE CXX_STANDARD 99)
 #target_compile_options(queueStatic PRIVATE CXX_STANDARD 99)
@@ -61,10 +56,20 @@ target_link_libraries(qrepair queue)
 add_executable(qtest qtest.c queueutils.c)
 target_link_libraries(qtest queue pthread)
 
-add_executable(qtest1 qtest1.c queueutils.c)
-SET_TARGET_PROPERTIES(qtest1 PROPERTIES
-    COMPILE_FLAGS "-ggdb ${EXTREMECUNIT_CFLAGS2}"
-    )
+find_package(PkgConfig)
+if ($(PKG_CONFIG_FOUND))
+    pkg_check_modules (EXTREMECUNIT ExtremeCUnit)
+endif ($(PKG_CONFIG_FOUND))
+
+
+if (${EXTREMECUNIT_FOUND})
+    string(REPLACE ";" " " EXTREMECUNIT_LDFLAGS2 "${EXTREMECUNIT_LDFLAGS}" )
+    string(REPLACE ";" " " EXTREMECUNIT_CFLAGS2 "${EXTREMECUNIT_CFLAGS}" )
+    add_executable(qtest1 qtest1.c queueutils.c)
+    SET_TARGET_PROPERTIES(qtest1 PROPERTIES
+        COMPILE_FLAGS "-ggdb ${EXTREMECUNIT_CFLAGS2}"
+        )
+endif (${EXTREMECUNIT_FOUND})
 
 target_link_libraries(qtest1 ${EXTREMECUNIT_LDFLAGS})
 
